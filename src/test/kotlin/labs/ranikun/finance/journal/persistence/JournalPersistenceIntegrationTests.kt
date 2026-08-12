@@ -7,11 +7,13 @@ import labs.ranikun.finance.journal.application.JournalCreateCommand
 import labs.ranikun.finance.journal.application.ResolvedJournalTime
 import labs.ranikun.finance.journal.domain.JournalAction
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.annotation.Import
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.ActiveProfiles
 import java.time.Instant
@@ -114,5 +116,32 @@ class JournalPersistenceIntegrationTests {
             2 to "same",
             3 to "last",
         )
+    }
+
+    @Test
+    fun detailDiscriminatorCannotCrossJournalType() {
+        val journalId = journalCreateApplicationService.create(
+            JournalCreateCommand.Investment(
+                assetName = "ETF",
+                action = JournalAction.BUY,
+                reasoning = "thesis",
+                emotion = null,
+                occurredAt = ResolvedJournalTime(
+                    occurredAt = Instant.parse("2026-08-12T05:30:00Z"),
+                    occurredLocalAt = LocalDateTime.of(2026, 8, 12, 14, 30),
+                    occurredTimeZone = "Asia/Seoul",
+                ),
+            ),
+        )
+
+        assertThatThrownBy {
+            jdbcTemplate.update(
+                """
+                INSERT INTO study_journals (journal_id, journal_type, title, key_content)
+                VALUES (?, 'study', 'Study', 'content')
+                """.trimIndent(),
+                journalId,
+            )
+        }.isInstanceOf(DataIntegrityViolationException::class.java)
     }
 }

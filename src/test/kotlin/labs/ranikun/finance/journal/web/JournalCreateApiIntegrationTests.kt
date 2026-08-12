@@ -127,6 +127,28 @@ class JournalCreateApiIntegrationTests {
     }
 
     @Test
+    fun trimsOuterWhitespaceAndPreservesInternalFormatting() {
+        val result = mockMvc.perform(
+            post("/finance/journals")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    investmentJson()
+                        .replace("\"assetName\": \"ETF\"", "\"assetName\": \"  ETF  \"")
+                        .replace("\"reasoning\": \"thesis\"", "\"reasoning\": \"  line one\\nline  two  \""),
+                ),
+        )
+            .andExpect(status().isCreated)
+            .andReturn()
+        val journalId = result.response.getHeader(HttpHeaders.LOCATION).orEmpty().substringAfterLast('/')
+
+        assertThat(jdbcTemplate.queryForMap(
+            "SELECT asset_name, reasoning FROM investment_journals WHERE journal_id = ?",
+            UUID.fromString(journalId),
+        )).containsEntry("asset_name", "ETF")
+            .containsEntry("reasoning", "line one\nline  two")
+    }
+
+    @Test
     fun emptyQuestionsAndTenQuestionsWithFiveHundredCharacterItemAreValid() {
         performValidStudy(emptyList())
         performValidStudy(List(10) { if (it == 0) "q".repeat(500) else "q$it" })

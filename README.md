@@ -2,15 +2,17 @@
 
 ## Purpose
 
-Finance Harness Backend owns the Finance product runtime and its `finance_db` logical database. This S1 slice establishes the Spring MVC, PostgreSQL, Flyway, health, and test foundation for the later Journal slice.
+Finance Harness Backend owns the Finance product runtime and its `finance_db` logical database. S2 adds the first durable Journal record and the protected `POST /finance/journals` create path on top of the S1 Spring MVC, PostgreSQL, Flyway, health, and test foundation.
 
 ## Runtime stack
 
 - Kotlin on Java 21
 - Spring Boot 4.1.0 with Gradle Kotlin DSL
 - Spring MVC, Spring Data JPA, and Hibernate
-- PostgreSQL with Flyway migrations
+- PostgreSQL 18.x with Flyway migrations
 - Spring Boot Actuator
+- Jackson 3 with strict request-shape handling
+- Application-owned UUIDv7 Journal IDs
 
 ## Requirements
 
@@ -42,15 +44,23 @@ No database secret, token, cookie, trusted auth header, or financial request bod
 ./gradlew test
 ```
 
-The integration tests require a running Docker daemon and use a pinned `postgres:16-alpine` Testcontainers image.
+The integration tests require a reachable Docker daemon and start `postgres:18.4-alpine3.24` through Testcontainers. The test container creates the `finance_db` logical database and applies Flyway V1 before Hibernate validation.
 
 ## Migration ownership
 
-Flyway is the schema source of truth. S1 intentionally has no product migration; the first real Journal migration is owned by S2. Hibernate is configured with `ddl-auto=validate` and never creates or updates schema. Open Session in View is disabled.
+Flyway is the schema source of truth. `V1__create_journal_schema.sql` owns `journals`, `investment_journals`, `study_journals`, and `study_open_questions`, including relational constraints, discriminator checks, ordered-question keys, and owner chronology indexing. Hibernate is configured with `ddl-auto=validate` and never creates or updates schema. Open Session in View is disabled.
+
+## Journal Create
+
+`POST /finance/journals` accepts the frozen `investment` and `study` request shapes. A successful request returns `201 Created`, a `/finance/journals/{journalId}` `Location` header, and a non-blank `journalId` body. The owner is obtained from `CurrentUserPort`; identity fields in the client payload are rejected.
+
+`occurredAt` is a strict local wall-clock value paired with a registered IANA `timeZone`. DST gaps and overlaps are rejected, while the resolved instant, original local value, and original zone are persisted together. Study `openQuestions` is required, accepts an empty list, preserves order and duplicates, and is limited to 10 items of 500 characters each.
+
+For local development, activate the `local` profile and provide `FINANCE_LOCAL_IDENTITY_USER_ID`. The local adapter is available only when the profile is `local` or `test` and `finance.auth.mode=local`; it is not a production authentication integration or fallback.
 
 ## Scope boundaries
 
-S1 is backend foundation only. S2 adds Journal persistence, Journal API, UUIDv7 ownership, current-user consumption, and Journal time/DST handling.
+S2 does not implement Journal detail/list reads, production Shared Identity integration, Spring Security/JWT/JWKS, idempotency, FE production activation, or AI/NATS/outbox/review processing. Those require later reliability, platform, and review slices.
 
 Finance owns `finance_db` and must not access the Shared Identity or Carelog logical databases. Shared Identity remains the authentication source; its concrete consumer integration is a later platform slice.
 

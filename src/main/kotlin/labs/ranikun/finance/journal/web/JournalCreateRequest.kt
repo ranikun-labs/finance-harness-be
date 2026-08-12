@@ -50,10 +50,32 @@ data class InvestmentJournalCreateRequest(
 ) : JournalCreateRequest {
 
     override fun toCommand(timeResolver: JournalTimeResolver): JournalCreateCommand {
-        val normalizedOccurredAt = requiredText("occurredAt", occurredAt)
-        val normalizedTimeZone = requiredText("timeZone", timeZone)
-        val normalizedAction = requiredText("action", action)
-        val normalizedEmotion = emotion?.let { requiredText("emotion", it) }
+        val rawAssetName = boundedRawText("assetName", assetName, JournalConstraints.ASSET_NAME_MAX_LENGTH)
+        val rawOccurredAt = requiredText("occurredAt", occurredAt)
+        val rawTimeZone = requiredText("timeZone", timeZone)
+        val rawAction = requiredText("action", action)
+        val rawReasoning = boundedRawText("reasoning", reasoning, JournalConstraints.REASONING_MAX_LENGTH)
+        val rawEmotion = emotion?.let { requiredText("emotion", it) }
+
+        val normalizedAssetName = rawAssetName.trim()
+        val normalizedOccurredAt = rawOccurredAt.trim()
+        val normalizedTimeZone = rawTimeZone.trim()
+        val normalizedAction = rawAction.trim()
+        val normalizedReasoning = rawReasoning.trim()
+        val normalizedEmotion = rawEmotion?.trim()
+
+        val parsedAction = try {
+            JournalAction.fromWire(normalizedAction)
+        } catch (exception: IllegalArgumentException) {
+            throw InvalidJournalRequestException(listOf(JournalFieldError("action", "invalid_enum")))
+        }
+        val parsedEmotion = normalizedEmotion?.let {
+            try {
+                JournalEmotion.fromWire(it)
+            } catch (exception: IllegalArgumentException) {
+                throw InvalidJournalRequestException(listOf(JournalFieldError("emotion", "invalid_enum")))
+            }
+        }
         val resolvedTime = try {
             timeResolver.resolve(normalizedOccurredAt, normalizedTimeZone)
         } catch (exception: InvalidJournalTimeException) {
@@ -63,20 +85,10 @@ data class InvestmentJournalCreateRequest(
         }
 
         return JournalCreateCommand.Investment(
-            assetName = boundedText("assetName", assetName, JournalConstraints.ASSET_NAME_MAX_LENGTH),
-            action = try {
-                JournalAction.fromWire(normalizedAction)
-            } catch (exception: IllegalArgumentException) {
-                throw InvalidJournalRequestException(listOf(JournalFieldError("action", "invalid_enum")))
-            },
-            reasoning = boundedText("reasoning", reasoning, JournalConstraints.REASONING_MAX_LENGTH),
-            emotion = normalizedEmotion?.let {
-                try {
-                    JournalEmotion.fromWire(it)
-                } catch (exception: IllegalArgumentException) {
-                    throw InvalidJournalRequestException(listOf(JournalFieldError("emotion", "invalid_enum")))
-                }
-            },
+            assetName = normalizedAssetName,
+            action = parsedAction,
+            reasoning = normalizedReasoning,
+            emotion = parsedEmotion,
             occurredAt = resolvedTime,
         )
     }
@@ -103,8 +115,26 @@ data class StudyJournalCreateRequest(
 ) : JournalCreateRequest {
 
     override fun toCommand(timeResolver: JournalTimeResolver): JournalCreateCommand {
-        val normalizedOccurredAt = requiredText("occurredAt", occurredAt)
-        val normalizedTimeZone = requiredText("timeZone", timeZone)
+        val rawTitle = boundedRawText("title", title, JournalConstraints.TITLE_MAX_LENGTH)
+        val rawKeyContent = boundedRawText("keyContent", keyContent, JournalConstraints.KEY_CONTENT_MAX_LENGTH)
+        val rawOccurredAt = requiredText("occurredAt", occurredAt)
+        val rawTimeZone = requiredText("timeZone", timeZone)
+
+        if (openQuestions.size > JournalConstraints.OPEN_QUESTIONS_MAX_COUNT) {
+            throw InvalidJournalRequestException(listOf(JournalFieldError("openQuestions", "too_many")))
+        }
+
+        val rawQuestions = openQuestions.mapIndexed { index, question ->
+            val field = "openQuestions[$index]"
+            val nonNullQuestion = question
+                ?: throw InvalidJournalRequestException(listOf(JournalFieldError(field, "required")))
+            boundedRawText(field, nonNullQuestion, JournalConstraints.OPEN_QUESTION_MAX_LENGTH)
+        }
+        val normalizedTitle = rawTitle.trim()
+        val normalizedKeyContent = rawKeyContent.trim()
+        val normalizedOccurredAt = rawOccurredAt.trim()
+        val normalizedTimeZone = rawTimeZone.trim()
+        val normalizedQuestions = rawQuestions.map(String::trim)
         val resolvedTime = try {
             timeResolver.resolve(normalizedOccurredAt, normalizedTimeZone)
         } catch (exception: InvalidJournalTimeException) {
@@ -113,20 +143,9 @@ data class StudyJournalCreateRequest(
             )
         }
 
-        if (openQuestions.size > JournalConstraints.OPEN_QUESTIONS_MAX_COUNT) {
-            throw InvalidJournalRequestException(listOf(JournalFieldError("openQuestions", "too_many")))
-        }
-
-        val normalizedQuestions = openQuestions.mapIndexed { index, question ->
-            val field = "openQuestions[$index]"
-            val nonNullQuestion = question
-                ?: throw InvalidJournalRequestException(listOf(JournalFieldError(field, "required")))
-            boundedText(field, nonNullQuestion, JournalConstraints.OPEN_QUESTION_MAX_LENGTH)
-        }
-
         return JournalCreateCommand.Study(
-            title = boundedText("title", title, JournalConstraints.TITLE_MAX_LENGTH),
-            keyContent = boundedText("keyContent", keyContent, JournalConstraints.KEY_CONTENT_MAX_LENGTH),
+            title = normalizedTitle,
+            keyContent = normalizedKeyContent,
             openQuestions = normalizedQuestions,
             occurredAt = resolvedTime,
         )
@@ -137,13 +156,13 @@ private fun requiredText(field: String, value: String): String {
     if (value.isBlank()) {
         throw InvalidJournalRequestException(listOf(JournalFieldError(field, "required")))
     }
-    return value.trim()
+    return value
 }
 
-private fun boundedText(field: String, value: String, maxLength: Int): String {
-    val normalized = requiredText(field, value)
-    if (value.length > maxLength) {
+private fun boundedRawText(field: String, value: String, maxLength: Int): String {
+    val raw = requiredText(field, value)
+    if (raw.length > maxLength) {
         throw InvalidJournalRequestException(listOf(JournalFieldError(field, "too_long")))
     }
-    return normalized
+    return raw
 }
