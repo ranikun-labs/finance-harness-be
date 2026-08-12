@@ -12,7 +12,7 @@ class TestcontainersConfiguration {
 	@Bean
 	@ServiceConnection
 	fun postgresContainer(): PostgreSQLContainer {
-		return PostgreSQLContainer(DockerImageName.parse("postgres:16-alpine"))
+		return PostgreSQLContainer(DockerImageName.parse("postgres:18.4-alpine3.24"))
 			.withDatabaseName("finance_db")
 	}
 
