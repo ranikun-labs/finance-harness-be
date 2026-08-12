@@ -1,0 +1,10 @@
+spring:
+  config:
+    activate:
+      on-profile: local
+
+finance:
+  auth:
+    mode: local
+    local:
+      identity-user-id: ${FINANCE_LOCAL_IDENTITY_USER_ID}
