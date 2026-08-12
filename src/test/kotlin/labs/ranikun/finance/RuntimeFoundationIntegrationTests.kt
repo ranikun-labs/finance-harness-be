@@ -10,6 +10,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.annotation.Import
 import org.springframework.core.env.Environment
 import org.springframework.test.annotation.DirtiesContext
+import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
@@ -19,6 +20,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration::class)
 @SpringBootTest
+@ActiveProfiles("test")
 class RuntimeFoundationIntegrationTests {
 
     @Autowired
@@ -37,8 +39,14 @@ class RuntimeFoundationIntegrationTests {
     lateinit var dataSource: HikariDataSource
 
     @Test
-    fun applicationContextStartsAgainstPostgreSQLWithoutProductMigrations() {
-        assertThat(flyway.info().all()).isEmpty()
+    fun applicationContextStartsAgainstPostgreSQLAndAppliesJournalMigration() {
+        assertThat(flyway.info().applied().mapNotNull { it.version?.version })
+            .containsExactly("1")
+        assertThat(dataSource.connection.use { connection ->
+            connection.metaData.getTables(null, null, "journals", null).use { tables ->
+                tables.next()
+            }
+        }).isTrue()
     }
 
     @Test
