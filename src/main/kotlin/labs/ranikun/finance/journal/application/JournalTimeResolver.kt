@@ -1,5 +1,6 @@
 package labs.ranikun.finance.journal.application
 
+import org.springframework.stereotype.Component
 import java.time.DateTimeException
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -16,25 +17,32 @@ data class ResolvedJournalTime(
     val occurredTimeZone: String,
 )
 
+class InvalidJournalTimeException(
+    val fieldName: String,
+    message: String,
+    cause: Throwable? = null,
+) : IllegalArgumentException(message, cause)
+
+@Component
 class JournalTimeResolver {
 
     fun resolve(occurredAt: String, timeZone: String): ResolvedJournalTime {
         val localDateTime = try {
             LocalDateTime.parse(occurredAt, LOCAL_DATE_TIME_FORMATTER)
         } catch (exception: DateTimeException) {
-            throw IllegalArgumentException("Invalid occurredAt", exception)
+            throw InvalidJournalTimeException("occurredAt", "Invalid occurredAt", exception)
         }
 
         if (timeZone !in ZoneId.getAvailableZoneIds()) {
-            throw IllegalArgumentException("Invalid IANA time zone")
+            throw InvalidJournalTimeException("timeZone", "Invalid IANA time zone")
         }
 
         val zoneId = ZoneId.of(timeZone)
         val validOffsets = zoneId.rules.getValidOffsets(localDateTime)
         val offset = when (validOffsets.size) {
             1 -> validOffsets.single()
-            0 -> throw IllegalArgumentException("DST gap is not a valid local time")
-            else -> throw IllegalArgumentException("DST overlap is not a valid local time")
+            0 -> throw InvalidJournalTimeException("occurredAt", "DST gap is not a valid local time")
+            else -> throw InvalidJournalTimeException("occurredAt", "DST overlap is not a valid local time")
         }
 
         return ResolvedJournalTime(
