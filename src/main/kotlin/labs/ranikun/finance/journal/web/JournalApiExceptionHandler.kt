@@ -1,6 +1,7 @@
 package labs.ranikun.finance.journal.web
 
 import labs.ranikun.finance.common.web.RequestIdFilter
+import labs.ranikun.finance.journal.application.JournalNotFoundException
 import org.slf4j.LoggerFactory
 import org.slf4j.MDC
 import org.springframework.http.HttpStatus
@@ -40,6 +41,17 @@ class JournalApiExceptionHandler {
     @ExceptionHandler(InvalidJournalRequestException::class)
     fun handleJournalValidation(exception: InvalidJournalRequestException): ResponseEntity<JournalErrorResponse> =
         invalidRequest(exception.fieldErrors)
+
+    @ExceptionHandler(JournalNotFoundException::class)
+    fun handleJournalNotFound(): ResponseEntity<JournalErrorResponse> =
+        ResponseEntity.status(HttpStatus.NOT_FOUND).body(
+            JournalErrorResponse(
+                code = "journal_not_found",
+                message = "Journal not found.",
+                requestId = requestId(),
+                fieldErrors = emptyList(),
+            ),
+        )
 
     @ExceptionHandler(HttpMessageNotReadableException::class)
     fun handleUnreadableRequest(): ResponseEntity<JournalErrorResponse> = invalidRequest(emptyList())
