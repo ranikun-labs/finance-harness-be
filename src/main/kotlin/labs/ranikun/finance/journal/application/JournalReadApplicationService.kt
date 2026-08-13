@@ -12,6 +12,8 @@ interface JournalReadStore {
     fun findDetail(owner: IdentityUserId, journalId: UUID): JournalDetailRecord?
 
     fun findStudyOpenQuestions(owner: IdentityUserId, journalId: UUID): List<String>
+
+    fun findList(owner: IdentityUserId, cursor: JournalCursor?, limitPlusOne: Int): List<JournalListRecord>
 }
 
 data class JournalDetailRecord(
@@ -27,6 +29,28 @@ data class JournalDetailRecord(
     val emotion: String?,
     val title: String?,
     val keyContent: String?,
+)
+
+data class JournalCursor(
+    val version: Int,
+    val occurredAtUtc: Instant,
+    val journalId: UUID,
+)
+
+data class JournalListRecord(
+    val journalId: UUID,
+    val type: String,
+    val occurredAtUtc: Instant,
+    val occurredLocalAt: LocalDateTime,
+    val timeZone: String,
+    val assetName: String?,
+    val action: String?,
+    val title: String?,
+)
+
+data class JournalListPage(
+    val items: List<JournalListRecord>,
+    val nextCursor: JournalCursor?,
 )
 
 sealed interface JournalDetail {
@@ -99,5 +123,28 @@ class JournalReadApplicationService(
 
             else -> error("Unknown persisted Journal type: ${record.type}")
         }
+    }
+
+    fun findList(limit: Int, cursor: JournalCursor?): JournalListPage {
+        val owner = currentUserPort.currentUserId()
+        val rows = journalReadStore.findList(owner, cursor, limit + 1)
+        val hasNextPage = rows.size > limit
+        val items = if (hasNextPage) rows.take(limit) else rows
+        val nextCursor = if (hasNextPage) {
+            items.last().let { last ->
+                JournalCursor(
+                    version = CURSOR_VERSION,
+                    occurredAtUtc = last.occurredAtUtc,
+                    journalId = last.journalId,
+                )
+            }
+        } else {
+            null
+        }
+        return JournalListPage(items, nextCursor)
+    }
+
+    private companion object {
+        const val CURSOR_VERSION = 1
     }
 }
