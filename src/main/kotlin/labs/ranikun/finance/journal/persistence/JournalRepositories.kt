@@ -10,3 +10,12 @@ interface InvestmentJournalJpaRepository : JpaRepository<InvestmentJournalEntity
 interface StudyJournalJpaRepository : JpaRepository<StudyJournalEntity, UUID>
 
 interface StudyOpenQuestionJpaRepository : JpaRepository<StudyOpenQuestionEntity, StudyOpenQuestionId>
+
+interface JournalIdempotencyRecordJpaRepository : JpaRepository<JournalIdempotencyRecordEntity, Long> {
+
+    fun findByIdentityUserIdAndOperationAndIdempotencyKey(
+        identityUserId: String,
+        operation: String,
+        idempotencyKey: String,
+    ): JournalIdempotencyRecordEntity?
+}
