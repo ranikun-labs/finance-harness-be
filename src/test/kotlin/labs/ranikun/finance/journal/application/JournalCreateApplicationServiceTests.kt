@@ -4,8 +4,10 @@ import labs.ranikun.finance.identity.application.CurrentUserPort
 import labs.ranikun.finance.identity.application.IdentityUserId
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.time.Clock
 import java.time.Instant
 import java.time.LocalDateTime
+import java.time.ZoneOffset
 import java.util.UUID
 
 class JournalCreateApplicationServiceTests {
@@ -20,11 +22,7 @@ class JournalCreateApplicationServiceTests {
     @Test
     fun ownerComesOnlyFromCurrentUserPortAndInvestmentIsDispatchedToStore() {
         val store = RecordingJournalStore()
-        val service = JournalCreateApplicationService(
-            currentUserPort = FixedCurrentUserPort(IdentityUserId("shared-user-42")),
-            journalIdGenerator = FixedJournalIdGenerator(fixedJournalId),
-            journalStore = store,
-        )
+        val service = service(store)
 
         val journalId = service.create(
             JournalCreateCommand.Investment(
@@ -34,6 +32,7 @@ class JournalCreateApplicationServiceTests {
                 emotion = null,
                 occurredAt = resolvedTime,
             ),
+            idempotencyKey = "investment-key",
         )
 
         assertThat(journalId).isEqualTo(fixedJournalId)
@@ -45,11 +44,7 @@ class JournalCreateApplicationServiceTests {
     @Test
     fun studyDispatchPreservesQuestionOrderAndDuplicates() {
         val store = RecordingJournalStore()
-        val service = JournalCreateApplicationService(
-            currentUserPort = FixedCurrentUserPort(IdentityUserId("shared-user-42")),
-            journalIdGenerator = FixedJournalIdGenerator(fixedJournalId),
-            journalStore = store,
-        )
+        val service = service(store)
         val questions = listOf("first", "same", "same", "last")
 
         service.create(
@@ -59,10 +54,27 @@ class JournalCreateApplicationServiceTests {
                 openQuestions = questions,
                 occurredAt = resolvedTime,
             ),
+            idempotencyKey = "study-key",
         )
 
         val savedStudy = store.savedCommand as JournalCreateCommand.Study
         assertThat(savedStudy.openQuestions).containsExactlyElementsOf(questions)
+    }
+
+    private fun service(store: RecordingJournalStore): JournalCreateApplicationService {
+        val idempotencyStore = RecordingIdempotencyStore()
+        return JournalCreateApplicationService(
+            currentUserPort = FixedCurrentUserPort(IdentityUserId("shared-user-42")),
+            journalCreateFingerprint = JournalCreateFingerprint(),
+            journalCreateTransactionalAttempt = JournalCreateTransactionalAttempt(
+                journalIdGenerator = FixedJournalIdGenerator(fixedJournalId),
+                journalStore = store,
+                idempotencyStore = idempotencyStore,
+                clock = Clock.fixed(Instant.parse("2026-08-12T05:31:00Z"), ZoneOffset.UTC),
+            ),
+            journalIdempotencyRecovery = JournalIdempotencyRecovery(idempotencyStore),
+            constraintViolationDetector = JournalIdempotencyConstraintViolationDetector(),
+        )
     }
 
     private class FixedCurrentUserPort(private val identityUserId: IdentityUserId) : CurrentUserPort {
@@ -87,5 +99,22 @@ class JournalCreateApplicationServiceTests {
             savedOwner = owner
             savedCommand = command
         }
+    }
+
+    private class RecordingIdempotencyStore : JournalIdempotencyStore {
+        override fun find(
+            owner: IdentityUserId,
+            operation: String,
+            idempotencyKey: String,
+        ): JournalIdempotencyRecord? = null
+
+        override fun save(
+            owner: IdentityUserId,
+            operation: String,
+            idempotencyKey: String,
+            requestFingerprint: String,
+            journalId: UUID,
+            createdAt: Instant,
+        ) = Unit
     }
 }

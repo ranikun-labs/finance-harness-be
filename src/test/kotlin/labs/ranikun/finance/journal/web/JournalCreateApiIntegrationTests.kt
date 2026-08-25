@@ -40,6 +40,8 @@ class JournalCreateApiIntegrationTests {
     @Autowired
     lateinit var jsonMapper: JsonMapper
 
+    private var idempotencyKeySequence = 0
+
     @Test
     fun scalarCoercionIsDisabled() {
         assertThat(jsonMapper.isEnabled(MapperFeature.ALLOW_COERCION_OF_SCALARS)).isFalse()
@@ -47,10 +49,12 @@ class JournalCreateApiIntegrationTests {
 
     @BeforeEach
     fun clearJournalRows() {
+        jdbcTemplate.update("DELETE FROM journal_idempotency_records")
         jdbcTemplate.update("DELETE FROM study_open_questions")
         jdbcTemplate.update("DELETE FROM study_journals")
         jdbcTemplate.update("DELETE FROM investment_journals")
         jdbcTemplate.update("DELETE FROM journals")
+        idempotencyKeySequence = 0
     }
 
     @Test
@@ -58,6 +62,7 @@ class JournalCreateApiIntegrationTests {
         val result = mockMvc.perform(
             post("/finance/journals")
                 .contentType(MediaType.APPLICATION_JSON)
+                .header("Idempotency-Key", nextIdempotencyKey())
                 .content(investmentJson()),
         )
             .andExpect(status().isCreated)
@@ -85,6 +90,7 @@ class JournalCreateApiIntegrationTests {
         val result = mockMvc.perform(
             post("/finance/journals")
                 .contentType(MediaType.APPLICATION_JSON)
+                .header("Idempotency-Key", nextIdempotencyKey())
                 .content(studyJson(questions)),
         )
             .andExpect(status().isCreated)
@@ -112,6 +118,7 @@ class JournalCreateApiIntegrationTests {
         val result = mockMvc.perform(
             post("/finance/journals")
                 .contentType(MediaType.APPLICATION_JSON)
+                .header("Idempotency-Key", nextIdempotencyKey())
                 .content(investmentJsonWithoutEmotion()),
         )
             .andExpect(status().isCreated)
@@ -131,6 +138,7 @@ class JournalCreateApiIntegrationTests {
         val result = mockMvc.perform(
             post("/finance/journals")
                 .contentType(MediaType.APPLICATION_JSON)
+                .header("Idempotency-Key", nextIdempotencyKey())
                 .content(
                     investmentJson()
                         .replace("\"assetName\": \"ETF\"", "\"assetName\": \"  ETF  \"")
@@ -160,6 +168,7 @@ class JournalCreateApiIntegrationTests {
         mockMvc.perform(
             post("/finance/journals")
                 .contentType(MediaType.APPLICATION_JSON)
+                .header("Idempotency-Key", nextIdempotencyKey())
                 .content(payload),
         )
             .andExpect(status().isBadRequest)
@@ -167,18 +176,27 @@ class JournalCreateApiIntegrationTests {
             .andExpect(jsonPath("$.message").value("Request is invalid."))
             .andExpect(jsonPath("$.requestId").isNotEmpty)
             .andExpect(jsonPath("$.fieldErrors").isArray)
+
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM journals", Int::class.java)).isZero
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM journal_idempotency_records",
+            Int::class.java,
+        )).isZero
     }
 
     private fun performValidStudy(questions: List<String>) {
         mockMvc.perform(
             post("/finance/journals")
                 .contentType(MediaType.APPLICATION_JSON)
+                .header("Idempotency-Key", nextIdempotencyKey())
                 .content(studyJson(questions)),
         )
             .andExpect(status().isCreated)
             .andExpect(header().string(HttpHeaders.LOCATION, org.hamcrest.Matchers.startsWith("/finance/journals/")))
             .andExpect(jsonPath("$.journalId").isNotEmpty)
     }
+
+    private fun nextIdempotencyKey(): String = "rpl50-api-${++idempotencyKeySequence}"
 
     companion object {
         private fun investmentJson(extraFields: String = ""): String = """

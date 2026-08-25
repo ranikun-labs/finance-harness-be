@@ -37,6 +37,7 @@ class JournalTransactionRollbackIntegrationTests {
 
     @BeforeEach
     fun clearJournalRows() {
+        jdbcTemplate.update("DELETE FROM journal_idempotency_records")
         jdbcTemplate.update("DELETE FROM study_open_questions")
         jdbcTemplate.update("DELETE FROM study_journals")
         jdbcTemplate.update("DELETE FROM investment_journals")
@@ -57,6 +58,7 @@ class JournalTransactionRollbackIntegrationTests {
                         occurredTimeZone = "Asia/Seoul",
                     ),
                 ),
+                idempotencyKey = "rollback-study",
             )
         }.isInstanceOf(ForcedRollbackException::class.java)
 
@@ -64,6 +66,7 @@ class JournalTransactionRollbackIntegrationTests {
         assertThat(count("study_journals")).isZero()
         assertThat(count("study_open_questions")).isZero()
         assertThat(count("investment_journals")).isZero()
+        assertThat(count("journal_idempotency_records")).isZero()
     }
 
     private fun count(table: String): Int = jdbcTemplate.queryForObject(

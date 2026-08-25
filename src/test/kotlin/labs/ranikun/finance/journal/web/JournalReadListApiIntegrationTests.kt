@@ -41,6 +41,7 @@ class JournalReadListApiIntegrationTests {
 
     @BeforeEach
     fun clearJournalRows() {
+        jdbcTemplate.update("DELETE FROM journal_idempotency_records")
         jdbcTemplate.update("DELETE FROM study_open_questions")
         jdbcTemplate.update("DELETE FROM study_journals")
         jdbcTemplate.update("DELETE FROM investment_journals")

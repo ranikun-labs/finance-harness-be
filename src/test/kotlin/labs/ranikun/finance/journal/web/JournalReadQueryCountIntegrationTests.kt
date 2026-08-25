@@ -50,6 +50,7 @@ class JournalReadQueryCountIntegrationTests {
 
     @BeforeEach
     fun clearJournalRows() {
+        jdbcTemplate.update("DELETE FROM journal_idempotency_records")
         jdbcTemplate.update("DELETE FROM study_open_questions")
         jdbcTemplate.update("DELETE FROM study_journals")
         jdbcTemplate.update("DELETE FROM investment_journals")
@@ -110,6 +111,7 @@ class JournalReadQueryCountIntegrationTests {
                     occurredTimeZone = "Asia/Seoul",
                 ),
             ),
+            idempotencyKey = "query-count-investment",
         )
         return journalId.toString()
     }
@@ -126,6 +128,7 @@ class JournalReadQueryCountIntegrationTests {
                     occurredTimeZone = "Asia/Seoul",
                 ),
             ),
+            idempotencyKey = "query-count-study",
         )
         return journalId.toString()
     }

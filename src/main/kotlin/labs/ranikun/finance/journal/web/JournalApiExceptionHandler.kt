@@ -1,6 +1,7 @@
 package labs.ranikun.finance.journal.web
 
 import labs.ranikun.finance.common.web.RequestIdFilter
+import labs.ranikun.finance.journal.application.IdempotencyKeyReusedException
 import labs.ranikun.finance.journal.application.JournalNotFoundException
 import org.slf4j.LoggerFactory
 import org.slf4j.MDC
@@ -42,6 +43,17 @@ class JournalApiExceptionHandler {
     fun handleJournalValidation(exception: InvalidJournalRequestException): ResponseEntity<JournalErrorResponse> =
         invalidRequest(exception.fieldErrors)
 
+    @ExceptionHandler(IdempotencyKeyReusedException::class)
+    fun handleIdempotencyKeyReused(): ResponseEntity<JournalErrorResponse> =
+        ResponseEntity.status(HttpStatus.CONFLICT).body(
+            JournalErrorResponse(
+                code = "idempotency_key_reused",
+                message = "Idempotency key was already used for a different request.",
+                requestId = requestId(),
+                fieldErrors = emptyList(),
+            ),
+        )
+
     @ExceptionHandler(JournalNotFoundException::class)
     fun handleJournalNotFound(): ResponseEntity<JournalErrorResponse> =
         ResponseEntity.status(HttpStatus.NOT_FOUND).body(
@@ -63,6 +75,7 @@ class JournalApiExceptionHandler {
             "journal_request_failed requestId={} exceptionType={}",
             requestId,
             exception::class.simpleName,
+            exception,
         )
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
             JournalErrorResponse(

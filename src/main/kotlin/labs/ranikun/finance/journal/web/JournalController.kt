@@ -85,6 +85,7 @@ class JournalController(
     private val journalReadApplicationService: JournalReadApplicationService,
     private val journalTimeResolver: JournalTimeResolver,
     private val journalCursorCodec: JournalCursorCodec,
+    private val idempotencyKeyValidator: IdempotencyKeyValidator,
 ) {
 
     @GetMapping
@@ -105,8 +106,15 @@ class JournalController(
         journalReadApplicationService.findDetail(parseJournalId(journalId)).toResponse()
 
     @PostMapping(consumes = [MediaType.APPLICATION_JSON_VALUE])
-    fun create(@Valid @RequestBody request: JournalCreateRequest): ResponseEntity<JournalCreateResponse> {
-        val journalId = journalCreateApplicationService.create(request.toCommand(journalTimeResolver))
+    fun create(
+        httpRequest: HttpServletRequest,
+        @Valid @RequestBody request: JournalCreateRequest,
+    ): ResponseEntity<JournalCreateResponse> {
+        val idempotencyKey = idempotencyKeyValidator.validate(httpRequest)
+        val journalId = journalCreateApplicationService.create(
+            command = request.toCommand(journalTimeResolver),
+            idempotencyKey = idempotencyKey,
+        )
         return ResponseEntity
             .created(URI.create("/finance/journals/$journalId"))
             .body(JournalCreateResponse(journalId.toString()))
