@@ -65,3 +65,40 @@ S2 does not implement Journal detail/list reads, production Shared Identity inte
 Finance owns `finance_db` and must not access the Shared Identity or Carelog logical databases. Shared Identity remains the authentication source; its concrete consumer integration is a later platform slice.
 
 AI calls are handled by a separate AI Server. NATS JetStream, ReviewExecution, RAG, embeddings, vector storage, LLM integration, evidence processing, and transactional outbox work belong to later review/runtime slices.
+
+## Container deployment (EC2 + external RDS)
+
+The production image is built in two stages: Gradle compiles the application with Java 21, then a Java 21 JRE image runs only the executable JAR as an unprivileged user. The image contains no database credentials. Compose supplies `FINANCE_DB_URL`, `FINANCE_DB_USERNAME`, and `FINANCE_DB_PASSWORD` at runtime. The production Compose file does not start or own a database; Finance continues to own the `finance_db` schema through Flyway, with Hibernate set to `validate`.
+
+### Build and run
+
+Install Docker Engine and Docker Compose v2. Create a runtime env file outside the repository (for example, `/secure/finance.env`) through the deployment secret injection process, with mode `0600`. Set the RDS JDBC URL with TLS, such as `jdbc:postgresql://<rds-host>:5432/finance_db?sslmode=require`, and supply the database username and password. Do not commit this file, add values as Docker build arguments, or paste its contents into logs or support output.
+
+```bash
+docker compose --env-file /secure/finance.env build
+docker compose --env-file /secure/finance.env up -d --wait
+docker compose ps
+curl --noproxy '*' --fail --silent http://127.0.0.1:8080/actuator/health/readiness
+```
+
+If a proxy-managed build requires a session CA, pass it as a BuildKit secret rather than copying it into the context or image: `docker build --secret id=proxy_ca,src="$CODEX_PROXY_CERT" -t finance-harness-be:local .`, then start the Compose service without `--build`.
+
+The image's readiness health check includes the database connection and reports no component details. The service listens on port `8080`; limit inbound EC2 security-group access to the intended load balancer or client networks. `FINANCE_HTTP_BIND_ADDRESS` can change the host bind address, and `FINANCE_IMAGE_TAG` selects the built image tag.
+
+### Local container smoke test
+
+This disposable Compose overlay starts a local PostgreSQL container only for smoke verification. Its credentials and fixed user ID are test-only and must never be reused for deployment.
+
+In a proxy-managed build environment, use the BuildKit-secret command above first and omit `--build` in the smoke command below.
+
+```bash
+FINANCE_HTTP_BIND_ADDRESS=127.0.0.1 docker compose -f compose.yaml -f compose.smoke.yaml --profile smoke up --build --wait
+curl --noproxy '*' --fail --silent http://127.0.0.1:8080/actuator/health/readiness
+FINANCE_HTTP_BIND_ADDRESS=127.0.0.1 docker compose -f compose.yaml -f compose.smoke.yaml --profile smoke down --remove-orphans
+```
+
+### Runtime behavior and production blocker
+
+Compose caps the service at one CPU and 768 MiB. The JVM uses container memory detection, caps heap at 55% of the container limit, and bounds metaspace, code cache, and direct memory. Spring graceful shutdown allows 30 seconds per phase; Compose forwards termination signals and waits up to 40 seconds.
+
+The `production` profile does not enable the local/test fixed-user adapter. A regression test checks that the adapter remains absent in production even if `finance.auth.mode=local` is accidentally set. A real Shared Identity `CurrentUserPort` integration and the production authentication/security boundary are not present in this repository slice. Without that integration, the application cannot wire the journal services under the production profile; do not work around this by enabling the `local` profile. Production activation is blocked until the Shared Identity integration is delivered. An RDS endpoint, credentials, and EC2-to-RDS network rules must also be supplied by the deployment environment; no RDS resource is created here.

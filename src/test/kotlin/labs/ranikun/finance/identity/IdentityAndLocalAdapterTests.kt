@@ -61,6 +61,19 @@ class IdentityAndLocalAdapterTests {
     }
 
     @Test
+    fun productionProfileDoesNotExposeLocalAdapterEvenWhenModeIsLocal() {
+        contextRunner
+            .withPropertyValues(
+                "spring.profiles.active=production",
+                "finance.auth.mode=local",
+                "finance.auth.local.identity-user-id=local-user-42",
+            )
+            .run { context ->
+                assertThat(context).doesNotHaveBean(CurrentUserPort::class.java)
+            }
+    }
+
+    @Test
     fun blankConfiguredIdentityFailsStartup() {
         contextRunner
             .withPropertyValues(

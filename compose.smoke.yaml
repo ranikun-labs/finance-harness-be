@@ -1,0 +1,26 @@
+services:
+  finance-harness-be:
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      FINANCE_DB_URL: jdbc:postgresql://postgres:5432/finance_db
+      FINANCE_DB_USERNAME: finance_smoke
+      FINANCE_DB_PASSWORD: smoke-only-not-production
+      FINANCE_LOCAL_IDENTITY_USER_ID: container-smoke-user
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:18.4-alpine3.24
+    profiles: [smoke]
+    environment:
+      POSTGRES_DB: finance_db
+      POSTGRES_USER: finance_smoke
+      POSTGRES_PASSWORD: smoke-only-not-production
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finance_smoke -d finance_db"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    mem_limit: 256m
+    cpus: 0.5
