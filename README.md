@@ -56,7 +56,7 @@ Flyway is the schema source of truth. `V1__create_journal_schema.sql` owns `jour
 
 `occurredAt` is a strict local wall-clock value paired with a registered IANA `timeZone`. DST gaps and overlaps are rejected, while the resolved instant, original local value, and original zone are persisted together. Study `openQuestions` is required, accepts an empty list, preserves order and duplicates, and is limited to 10 items of 500 characters each.
 
-For local development, activate the `local` profile and provide `FINANCE_LOCAL_IDENTITY_USER_ID`. The local adapter is available only when the profile is `local` or `test` and `finance.auth.mode=local`; it is not a production authentication integration or fallback.
+For local development, activate the `local` profile and provide `FINANCE_LOCAL_IDENTITY_USER_ID`. The local adapter is available only when an active profile is `local` or `test`, no active profile is `production`, and `finance.auth.mode=local`; it is not a production authentication integration or fallback.
 
 ## Scope boundaries
 
@@ -72,7 +72,9 @@ The production image is built in two stages: Gradle compiles the application wit
 
 ### Build and run
 
-Install Docker Engine and Docker Compose v2. Create a runtime env file outside the repository (for example, `/secure/finance.env`) through the deployment secret injection process, with mode `0600`. Set the RDS JDBC URL with TLS, such as `jdbc:postgresql://<rds-host>:5432/finance_db?sslmode=require`, and supply the database username and password. Do not commit this file, add values as Docker build arguments, or paste its contents into logs or support output.
+Install Docker Engine and Docker Compose v2. Create a runtime env file outside the repository (for example, `/secure/finance.env`) through the deployment secret injection process, with mode `0600`. Set the RDS JDBC URL with TLS and certificate/hostname verification, such as `jdbc:postgresql://<rds-host>:5432/finance_db?sslmode=verify-full&sslrootcert=/etc/finance/rds-ca-bundle.pem`, and supply the database username and password. Do not commit this file, add values as Docker build arguments, or paste its contents into logs or support output.
+
+The PostgreSQL JDBC driver's `sslmode=verify-full` validates the certificate chain and the server hostname. The RDS CA bundle must be made available inside the container at the `sslrootcert` path. The checked-in `compose.yaml` forwards `FINANCE_DB_URL` but does not mount or provision the CA bundle; the production deployment contract must supply a read-only CA mount and the matching JDBC URL. The sample URL therefore describes the required runtime configuration, not a CA injection feature already present in Compose.
 
 ```bash
 docker compose --env-file /secure/finance.env build
@@ -101,4 +103,4 @@ FINANCE_HTTP_BIND_ADDRESS=127.0.0.1 docker compose -f compose.yaml -f compose.sm
 
 Compose caps the service at one CPU and 768 MiB. The JVM uses container memory detection, caps heap at 55% of the container limit, and bounds metaspace, code cache, and direct memory. Spring graceful shutdown allows 30 seconds per phase; Compose forwards termination signals and waits up to 40 seconds.
 
-The `production` profile does not enable the local/test fixed-user adapter. A regression test checks that the adapter remains absent in production even if `finance.auth.mode=local` is accidentally set. A real Shared Identity `CurrentUserPort` integration and the production authentication/security boundary are not present in this repository slice. Without that integration, the application cannot wire the journal services under the production profile; do not work around this by enabling the `local` profile. Production activation is blocked until the Shared Identity integration is delivered. An RDS endpoint, credentials, and EC2-to-RDS network rules must also be supplied by the deployment environment; no RDS resource is created here.
+The local adapter is permitted only when `!production & (local | test)` matches and `finance.auth.mode=local`; any active profile list containing `production` excludes it, including mixed `production,local` and `production,test` lists. The checked-in Compose default profile is `production`, and this repository declares no `prod` alias. Regression tests cover these combinations even when a local user ID is supplied. A real Shared Identity `CurrentUserPort` integration and the production authentication/security boundary are not present in this repository slice. Without that integration, the application cannot wire the journal services under the production profile; do not work around this by enabling the `local` profile. Production activation is blocked until the Shared Identity integration is delivered. An RDS endpoint, credentials, and EC2-to-RDS network rules must also be supplied by the deployment environment; no RDS resource is created here.
