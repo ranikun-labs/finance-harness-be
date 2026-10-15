@@ -1,22 +1,23 @@
 package labs.ranikun.finance.common.metrics
 
 import com.zaxxer.hikari.HikariDataSource
-import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Timer
-import io.micrometer.core.instrument.binder.MeterBinder
 import org.aopalliance.intercept.MethodInterceptor
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.beans.factory.config.BeanPostProcessor
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.aop.framework.ProxyFactory
+import java.lang.reflect.InvocationHandler
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
 import java.sql.CallableStatement
 import java.sql.Connection
 import java.sql.PreparedStatement
+import java.sql.ResultSet
+import java.sql.SQLException
 import java.sql.Statement
 import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
@@ -27,7 +28,7 @@ class JdbcStatementDurationRecorder(
 ) {
     private val timers = ConcurrentHashMap<String, Timer>()
 
-    fun record(methodName: String, elapsedNanos: Long) {
+    fun record(methodName: String, elapsedNanos: Long, failure: Throwable? = null) {
         val operation = OPERATION_BY_METHOD[methodName] ?: return
         timers.computeIfAbsent(operation) { label ->
             Timer.builder(METRIC_NAME)
@@ -37,10 +38,15 @@ class JdbcStatementDurationRecorder(
                 .serviceLevelObjectives(*HISTOGRAM_BUCKETS)
                 .register(meterRegistry)
         }.record(elapsedNanos, TimeUnit.NANOSECONDS)
+
+        if (failure != null && PostgresTimeoutClassifier.isTimeout(failure)) {
+            meterRegistry.counter(TIMEOUT_METRIC, "operation", operation).increment()
+        }
     }
 
     companion object {
         private const val METRIC_NAME = "ranikun.db.query.duration"
+        private const val TIMEOUT_METRIC = "ranikun.db.query.timeouts"
         private val OPERATION_BY_METHOD = mapOf(
             "executeQuery" to "query",
             "executeUpdate" to "update",
@@ -68,25 +74,36 @@ class JdbcStatementDurationRecorder(
     }
 }
 
+object PostgresTimeoutClassifier {
+    private const val QUERY_CANCELED_SQL_STATE = "57014"
+    private const val MAX_CAUSE_DEPTH = 16
+
+    fun isTimeout(error: Throwable): Boolean {
+        val pending = ArrayDeque<Throwable>()
+        val seen = HashSet<Throwable>()
+        pending.add(error)
+        var depth = 0
+        while (pending.isNotEmpty() && depth++ < MAX_CAUSE_DEPTH) {
+            val current = pending.removeFirst()
+            if (!seen.add(current)) continue
+            if (current is java.sql.SQLTimeoutException) return true
+            if (current is SQLException && current.sqlState == QUERY_CANCELED_SQL_STATE) {
+                val message = current.message.orEmpty().lowercase()
+                if ("statement timeout" in message || "due to statement timeout" in message) return true
+            }
+            current.cause?.let(pending::addLast)
+            if (current is SQLException) current.nextException?.let(pending::addLast)
+        }
+        return false
+    }
+}
+
 @Configuration(proxyBeanMethods = false)
 class JdbcStatementDurationConfiguration {
 
     @Bean
     fun jdbcStatementDurationRecorder(meterRegistry: MeterRegistry) =
         JdbcStatementDurationRecorder(meterRegistry)
-
-    @Bean
-    fun financeHikariPoolMetrics(dataSource: HikariDataSource): MeterBinder = MeterBinder { registry ->
-        Gauge.builder("hikaricp.connections.active", dataSource) {
-            it.hikariPoolMXBean?.activeConnections?.toDouble() ?: 0.0
-        }.tag("pool", "finance-db").register(registry)
-        Gauge.builder("hikaricp.connections.max", dataSource) {
-            it.maximumPoolSize.toDouble()
-        }.tag("pool", "finance-db").register(registry)
-        Gauge.builder("hikaricp.connections.pending", dataSource) {
-            it.hikariPoolMXBean?.threadsAwaitingConnection?.toDouble() ?: 0.0
-        }.tag("pool", "finance-db").register(registry)
-    }
 
     @Bean
     fun instrumentHikariJdbcStatements(
@@ -98,8 +115,13 @@ class JdbcStatementDurationConfiguration {
             val proxyFactory = ProxyFactory(bean).apply {
                 isProxyTargetClass = true
                 addAdvice(MethodInterceptor { invocation ->
+                    if (invocation.method.name == "evictConnection") {
+                        invocation.arguments?.let { args ->
+                            if (args.isNotEmpty()) args[0] = underlyingJdbcTarget(args[0])
+                        }
+                    }
                     val result = invocation.proceed()
-                    if (invocation.method.name in CONNECTION_ACQUISITION_METHODS && result is Connection) {
+                    if (invocation.method.name == "getConnection" && result is Connection) {
                         instrumentConnection(result, recorderProvider)
                     } else {
                         result
@@ -109,33 +131,23 @@ class JdbcStatementDurationConfiguration {
             return proxyFactory.proxy
         }
     }
-
-    companion object {
-        private val CONNECTION_ACQUISITION_METHODS = setOf("getConnection")
-    }
 }
+
+private interface JdbcProxyMarker {
+    val jdbcTarget: Any
+}
+
+private fun underlyingJdbcTarget(value: Any?): Any? =
+    if (value is Proxy && Proxy.getInvocationHandler(value) is JdbcProxyMarker) {
+        (Proxy.getInvocationHandler(value) as JdbcProxyMarker).jdbcTarget
+    } else {
+        value
+    }
 
 private fun instrumentConnection(
     target: Connection,
     recorderProvider: ObjectProvider<JdbcStatementDurationRecorder>,
-): Connection {
-    lateinit var connectionProxy: Connection
-    connectionProxy = Proxy.newProxyInstance(
-        Connection::class.java.classLoader,
-        arrayOf(Connection::class.java),
-    ) { proxy, method, args ->
-        if (method.name == "unwrap" && args?.firstOrNull() == Connection::class.java) return@newProxyInstance proxy
-        if (method.name == "isWrapperFor" && args?.firstOrNull() == Connection::class.java) return@newProxyInstance true
-
-        val result = invokeJdbc(target, method, args)
-        if (result is Statement && method.name in STATEMENT_CREATION_METHODS) {
-            instrumentStatement(result, connectionProxy, recorderProvider)
-        } else {
-            result
-        }
-    } as Connection
-    return connectionProxy
-}
+): Connection = jdbcProxy(target, Connection::class.java, null, recorderProvider) as Connection
 
 private fun instrumentStatement(
     target: Statement,
@@ -147,31 +159,81 @@ private fun instrumentStatement(
         is PreparedStatement -> PreparedStatement::class.java
         else -> Statement::class.java
     }
-    return Proxy.newProxyInstance(
-        statementType.classLoader,
-        arrayOf(statementType),
-    ) { proxy, method, args ->
-        if (method.name == "getConnection") return@newProxyInstance connectionProxy
-        if (method.name == "unwrap") {
-            val requestedType = args?.firstOrNull() as? Class<*>
-            if (requestedType != null && requestedType.isInstance(proxy)) return@newProxyInstance proxy
-        }
-        if (method.name == "isWrapperFor") {
-            val requestedType = args?.firstOrNull() as? Class<*>
-            if (requestedType != null && requestedType.isInstance(proxy)) return@newProxyInstance true
+    return jdbcProxy(target, statementType, connectionProxy, recorderProvider) as Statement
+}
+
+private fun instrumentResultSet(
+    target: ResultSet,
+    statementProxy: Statement,
+    recorderProvider: ObjectProvider<JdbcStatementDurationRecorder>,
+): ResultSet = jdbcProxy(target, ResultSet::class.java, statementProxy, recorderProvider) as ResultSet
+
+private fun jdbcProxy(
+    target: Any,
+    primaryInterface: Class<*>,
+    parentProxy: Any?,
+    recorderProvider: ObjectProvider<JdbcStatementDurationRecorder>,
+): Any {
+    val handler = JdbcInvocationHandler(target, primaryInterface, parentProxy, recorderProvider)
+    return Proxy.newProxyInstance(primaryInterface.classLoader, arrayOf(primaryInterface), handler)
+}
+
+private class JdbcInvocationHandler(
+    override val jdbcTarget: Any,
+    private val primaryInterface: Class<*>,
+    private val parentProxy: Any?,
+    private val recorderProvider: ObjectProvider<JdbcStatementDurationRecorder>,
+) : InvocationHandler, JdbcProxyMarker {
+
+    override fun invoke(proxy: Any, method: Method, args: Array<out Any?>?): Any? {
+        when (method.name) {
+            "equals" -> return proxyEquals(proxy, args?.firstOrNull())
+            "hashCode" -> return System.identityHashCode(jdbcTarget)
+            "toString" -> return "${primaryInterface.simpleName}Proxy@${System.identityHashCode(jdbcTarget).toString(16)}"
+            "unwrap" -> {
+                val requested = args?.firstOrNull() as? Class<*>
+                if (requested != null && requested.isInstance(proxy)) return proxy
+            }
+            "isWrapperFor" -> {
+                val requested = args?.firstOrNull() as? Class<*>
+                if (requested != null && requested.isInstance(proxy)) return true
+            }
         }
 
-        if (method.name !in STATEMENT_EXECUTION_METHODS) {
-            return@newProxyInstance invokeJdbc(target, method, args)
+        if (jdbcTarget is Statement && method.name == "getConnection" && parentProxy is Connection) {
+            return parentProxy
+        }
+        if (jdbcTarget is ResultSet && method.name == "getStatement" && parentProxy is Statement) {
+            return parentProxy
         }
 
-        val startedAt = System.nanoTime()
+        val execution = method.name in STATEMENT_EXECUTION_METHODS && jdbcTarget is Statement
+        val startedAt = if (execution) System.nanoTime() else 0L
+        var failure: Throwable? = null
         try {
-            invokeJdbc(target, method, args)
+            val result = invokeJdbc(jdbcTarget, method, args)
+            if (result is Statement && jdbcTarget is Connection && parentProxy == null) {
+                return instrumentStatement(result, proxy as Connection, recorderProvider)
+            }
+            if (result is ResultSet && jdbcTarget is Statement && parentProxy is Connection) {
+                return instrumentResultSet(result, proxy as Statement, recorderProvider)
+            }
+            return result
+        } catch (error: Throwable) {
+            failure = error
+            throw error
         } finally {
-            recorderProvider.getObject().record(method.name, System.nanoTime() - startedAt)
+            if (execution) {
+                recorderProvider.getObject().record(method.name, System.nanoTime() - startedAt, failure)
+            }
         }
-    } as Statement
+    }
+
+    private fun proxyEquals(proxy: Any, other: Any?): Boolean {
+        if (proxy === other) return true
+        val otherTarget = underlyingJdbcTarget(other)
+        return otherTarget === jdbcTarget
+    }
 }
 
 private fun invokeJdbc(target: Any, method: Method, args: Array<out Any?>?): Any? = try {
@@ -180,7 +242,6 @@ private fun invokeJdbc(target: Any, method: Method, args: Array<out Any?>?): Any
     throw exception.targetException
 }
 
-private val STATEMENT_CREATION_METHODS = setOf("createStatement", "prepareStatement", "prepareCall")
 private val STATEMENT_EXECUTION_METHODS = setOf(
     "executeQuery",
     "executeUpdate",

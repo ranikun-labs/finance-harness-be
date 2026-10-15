@@ -5,21 +5,19 @@ import org.assertj.core.api.Assertions.assertThat
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.annotation.Import
 import org.springframework.core.env.Environment
 import org.springframework.test.annotation.DirtiesContext
 import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.web.servlet.MockMvc
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.testcontainers.postgresql.PostgreSQLContainer
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
 
-@AutoConfigureMockMvc
 @Import(TestcontainersConfiguration::class)
-@SpringBootTest
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
 class RuntimeFoundationIntegrationTests {
 
@@ -28,9 +26,6 @@ class RuntimeFoundationIntegrationTests {
 
     @Autowired
     lateinit var flyway: Flyway
-
-    @Autowired
-    lateinit var mockMvc: MockMvc
 
     @Autowired
     lateinit var postgresContainer: PostgreSQLContainer
@@ -64,15 +59,18 @@ class RuntimeFoundationIntegrationTests {
 
     @Test
     fun actuatorExposesHealthyLivenessAndDatabaseBackedReadiness() {
-        mockMvc.perform(get("/actuator/health"))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.status").value("UP"))
-        mockMvc.perform(get("/actuator/health/liveness"))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.status").value("UP"))
-        mockMvc.perform(get("/actuator/health/readiness"))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.status").value("UP"))
+        val management = managementBaseUrl()
+        val health = get("$management/actuator/health")
+        val liveness = get("$management/actuator/health/liveness")
+        val readiness = get("$management/actuator/health/readiness")
+        assertThat(health.statusCode()).isEqualTo(200)
+        assertThat(health.body()).contains("\"status\":\"UP\"")
+        assertThat(liveness.statusCode()).isEqualTo(200)
+        assertThat(liveness.body()).contains("\"status\":\"UP\"")
+        assertThat(readiness.statusCode()).isEqualTo(200)
+        assertThat(readiness.body()).contains("\"status\":\"UP\"")
+        assertThat(environment.getRequiredProperty("local.server.port").toInt())
+            .isNotEqualTo(environment.getRequiredProperty("local.management.port").toInt())
     }
 
     @Test
@@ -81,10 +79,18 @@ class RuntimeFoundationIntegrationTests {
         postgresContainer.stop()
         dataSource.close()
 
-        mockMvc.perform(get("/actuator/health/readiness"))
-            .andExpect(status().isServiceUnavailable)
-        mockMvc.perform(get("/actuator/health/liveness"))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.status").value("UP"))
+        assertThat(get("${managementBaseUrl()}/actuator/health/readiness").statusCode()).isEqualTo(503)
+        val liveness = get("${managementBaseUrl()}/actuator/health/liveness")
+        assertThat(liveness.statusCode()).isEqualTo(200)
+        assertThat(liveness.body()).contains("\"status\":\"UP\"")
     }
+
+    private fun managementBaseUrl(): String =
+        "http://127.0.0.1:${environment.getRequiredProperty("local.management.port")}"
+
+    private fun get(url: String): HttpResponse<String> =
+        HttpClient.newHttpClient().send(
+            HttpRequest.newBuilder(URI.create(url)).GET().build(),
+            HttpResponse.BodyHandlers.ofString(),
+        )
 }

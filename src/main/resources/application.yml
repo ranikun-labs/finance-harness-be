@@ -69,14 +69,11 @@ management:
           - 250ms
           - 500ms
           - 1s
-          - 2.5s
+          - 2500ms
           - 5s
           - 10s
           - 15s
           - 30s
-      maximum-expected-value:
-        http.server.requests: 30s
-
 logging:
   include-application-name: true
   structured:

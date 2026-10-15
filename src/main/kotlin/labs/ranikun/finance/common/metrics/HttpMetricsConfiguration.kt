@@ -3,6 +3,7 @@ package labs.ranikun.finance.common.metrics
 import io.micrometer.core.instrument.Meter
 import io.micrometer.core.instrument.Tag
 import io.micrometer.core.instrument.config.MeterFilter
+import java.time.Duration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.core.Ordered
@@ -15,7 +16,7 @@ class HttpMetricsConfiguration {
     @Order(Ordered.LOWEST_PRECEDENCE)
     fun boundedHttpServerMetricLabels(): MeterFilter = object : MeterFilter {
         override fun map(id: Meter.Id): Meter.Id {
-            if (id.name != HTTP_SERVER_REQUESTS) return id
+            if (id.name !in HTTP_SERVER_METRICS) return id
 
             val safeTags = id.tags.mapNotNull { tag ->
                 when (tag.key) {
@@ -29,6 +30,15 @@ class HttpMetricsConfiguration {
             }
             return id.replaceTags(safeTags)
         }
+
+        override fun configure(id: Meter.Id, config: io.micrometer.core.instrument.distribution.DistributionStatisticConfig): io.micrometer.core.instrument.distribution.DistributionStatisticConfig {
+            if (id.name != HTTP_SERVER_REQUESTS || id.type != Meter.Type.TIMER) return config
+            return config.merge(
+                io.micrometer.core.instrument.distribution.DistributionStatisticConfig.builder()
+                    .maximumExpectedValue(Duration.ofSeconds(30).toNanos().toDouble())
+                    .build(),
+            )
+        }
     }
 
     private fun boundedEnvironment(value: String): String = when {
@@ -41,6 +51,7 @@ class HttpMetricsConfiguration {
 
     companion object {
         private const val HTTP_SERVER_REQUESTS = "http.server.requests"
+        private val HTTP_SERVER_METRICS = setOf(HTTP_SERVER_REQUESTS, "$HTTP_SERVER_REQUESTS.active")
         private const val SERVICE_NAME = "finance-harness-be"
         private val ALLOWED_METHODS = setOf("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS")
         private val ALLOWED_STATUSES = setOf(

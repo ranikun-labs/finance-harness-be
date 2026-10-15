@@ -35,6 +35,7 @@ class HttpTimeoutMetricExceptionResolver(
             is AsyncRequestTimeoutException -> "async_request"
             is SocketTimeoutException -> "socket"
             is SQLTimeoutException, is JpaQueryTimeoutException, is SpringQueryTimeoutException -> "database"
+            is java.sql.SQLException -> "database"
             else -> "operation"
         }
         meterRegistry.counter(TIMEOUT_METRIC, "cause", cause).increment()
@@ -43,13 +44,25 @@ class HttpTimeoutMetricExceptionResolver(
         return null
     }
 
-    private fun causeChain(error: Throwable): Sequence<Throwable> =
-        generateSequence(error) { it.cause }.take(MAX_CAUSE_DEPTH)
+    private fun causeChain(error: Throwable): Sequence<Throwable> = sequence {
+        val pending = ArrayDeque<Throwable>()
+        val visited = HashSet<Throwable>()
+        pending.add(error)
+        repeat(MAX_CAUSE_DEPTH) {
+            if (pending.isEmpty()) return@sequence
+            val current = pending.removeFirst()
+            if (!visited.add(current)) return@repeat
+            yield(current)
+            current.cause?.let(pending::addLast)
+            if (current is java.sql.SQLException) current.nextException?.let(pending::addLast)
+        }
+    }
 
     private fun isTimeout(error: Throwable): Boolean =
         error is AsyncRequestTimeoutException ||
             error is SocketTimeoutException ||
             error is SQLTimeoutException ||
+            error is java.sql.SQLException && PostgresTimeoutClassifier.isTimeout(error) ||
             error is JpaQueryTimeoutException ||
             error is SpringQueryTimeoutException ||
             error is TimeoutException
