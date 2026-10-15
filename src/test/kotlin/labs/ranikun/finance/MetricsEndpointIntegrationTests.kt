@@ -148,8 +148,12 @@ class MetricsEndpointIntegrationTests {
         val statement = connection.createStatement()
         assertThat(statement.hashCode()).isEqualTo(statement.hashCode())
         assertThat(statement).isEqualTo(statement)
+        assertThat(statement.unwrap(java.sql.Statement::class.java)).isEqualTo(statement)
+        assertThat(statement.isWrapperFor(java.sql.Statement::class.java)).isTrue()
         val resultSet = statement.executeQuery("SELECT 1")
         assertThat(resultSet.next()).isTrue()
+        assertThat(resultSet.unwrap(java.sql.ResultSet::class.java)).isEqualTo(resultSet)
+        assertThat(resultSet.isWrapperFor(java.sql.ResultSet::class.java)).isTrue()
         assertThat(resultSet.statement).isEqualTo(statement)
         assertThat(resultSet.statement.connection).isEqualTo(connection)
 
