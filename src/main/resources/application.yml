@@ -24,6 +24,8 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: false
     validate-on-migrate: true
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
 
 server:
   shutdown: graceful
