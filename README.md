@@ -34,6 +34,9 @@ Runtime database settings are environment-backed:
 | `FINANCE_DB_APPLICATION_NAME` | Optional PostgreSQL connection application name |
 | `FINANCE_SERVICE_NAME` | Optional service identity; defaults to `finance-harness-be` |
 | `SPRING_PROFILES_ACTIVE` | Optional active profile value used in structured log service metadata |
+| `FINANCE_MANAGEMENT_PORT` | Private Actuator listener port; defaults to `8081` and is not published by Compose |
+| `FINANCE_MANAGEMENT_BIND_ADDRESS` | Defaults to loopback; Compose binds inside the container for private Alloy access |
+| `FINANCE_METRICS_ENVIRONMENT` | Bounded environment label; Compose fixes this to `production` |
 
 No database secret, token, cookie, trusted auth header, or financial request body is logged by this foundation.
 
@@ -80,12 +83,12 @@ The PostgreSQL JDBC driver's `sslmode=verify-full` validates the certificate cha
 docker compose --env-file /secure/finance.env build
 docker compose --env-file /secure/finance.env up -d --wait
 docker compose ps
-curl --noproxy '*' --fail --silent http://127.0.0.1:8080/actuator/health/readiness
+docker compose exec finance-harness-be wget -Y off -q -O - http://127.0.0.1:8081/actuator/health/readiness
 ```
 
 If a proxy-managed build requires a session CA, pass it as a BuildKit secret rather than copying it into the context or image: `docker build --secret id=proxy_ca,src="$CODEX_PROXY_CERT" -t finance-harness-be:local .`, then start the Compose service without `--build`.
 
-The image's readiness health check includes the database connection and reports no component details. The service listens on port `8080`; limit inbound EC2 security-group access to the intended load balancer or client networks. `FINANCE_HTTP_BIND_ADDRESS` can change the host bind address, and `FINANCE_IMAGE_TAG` selects the built image tag.
+The image's readiness health check includes the database connection and reports no component details. The application listener uses port `8080`; limit inbound EC2 security-group access to the intended load balancer or client networks. `FINANCE_HTTP_BIND_ADDRESS` can change the host bind address, and `FINANCE_IMAGE_TAG` selects the built image tag. Actuator uses a separate listener on port `8081`; Compose does not publish this port on the host.
 
 ### Local container smoke test
 
@@ -95,7 +98,7 @@ In a proxy-managed build environment, use the BuildKit-secret command above firs
 
 ```bash
 FINANCE_HTTP_BIND_ADDRESS=127.0.0.1 docker compose -f compose.yaml -f compose.smoke.yaml --profile smoke up --build --wait
-curl --noproxy '*' --fail --silent http://127.0.0.1:8080/actuator/health/readiness
+docker compose -f compose.yaml -f compose.smoke.yaml --profile smoke exec finance-harness-be wget -Y off -q -O - http://127.0.0.1:8081/actuator/health/readiness
 FINANCE_HTTP_BIND_ADDRESS=127.0.0.1 docker compose -f compose.yaml -f compose.smoke.yaml --profile smoke down --remove-orphans
 ```
 
@@ -104,3 +107,15 @@ FINANCE_HTTP_BIND_ADDRESS=127.0.0.1 docker compose -f compose.yaml -f compose.sm
 Compose caps the service at one CPU and 768 MiB. The JVM uses container memory detection, caps heap at 55% of the container limit, and bounds metaspace, code cache, and direct memory. Spring graceful shutdown allows 30 seconds per phase; Compose forwards termination signals and waits up to 40 seconds.
 
 The local adapter is permitted only when `!production & (local | test)` matches and `finance.auth.mode=local`; any active profile list containing `production` excludes it, including mixed `production,local` and `production,test` lists. The checked-in Compose default profile is `production`, and this repository declares no `prod` alias. Regression tests cover these combinations even when a local user ID is supplied. A real Shared Identity `CurrentUserPort` integration and the production authentication/security boundary are not present in this repository slice. Without that integration, the application cannot wire the journal services under the production profile; do not work around this by enabling the `local` profile. Production activation is blocked until the Shared Identity integration is delivered. An RDS endpoint, credentials, and EC2-to-RDS network rules must also be supplied by the deployment environment; no RDS resource is created here.
+
+## Metrics and private Alloy scrape
+
+Prometheus metrics are served at `/actuator/prometheus` on the separate management listener at port `8081`. The application listener on port `8080` does not serve Actuator endpoints. Compose publishes only port `8080`; port `8081` is available to containers attached to the private Compose network. Keep public ingress and security-group rules limited to the application port, and attach the Alloy agent to the service's private Docker network.
+
+`observability/finance-harness-be.alloy` contains the Alloy scrape component. It scrapes `finance-harness-be:8081` every 15 seconds and forwards samples to the environment's existing `prometheus.remote_write.default` receiver. For the default Compose project name, an Alloy container can join the network with `docker network connect finance-harness-be_default <alloy-container>`; use the actual Compose network name if the project name is overridden. Do not add a host `ports` mapping for `8081`.
+
+The application exports Spring's `http.server.requests` request count and duration histogram, including status/outcome dimensions, and JVM, process, and Hikari metrics. HTTP metric labels are restricted to service, environment, method, status, and outcome; raw paths and exception names are removed. JDBC timings are recorded around actual `Statement.execute*` calls as `ranikun_db_query_duration_seconds_*`; the only JDBC label is a bounded operation type, and SQL text is neither stored nor exported. Timeout counts increment only when MVC receives a recognized timeout exception cause; they do not infer a timeout from an HTTP status alone.
+
+Percentiles can be calculated from the exported buckets, for example: `histogram_quantile(0.95, sum by (le, service, environment) (rate(http_server_requests_seconds_bucket[5m])))`. Use `0.50` and `0.99` for P50 and P99.
+
+The application does not currently publish a verified per-process RSS metric. **Process RSS status: UNKNOWN.** Use an Alloy host/process metric source for RSS and confirm the process-level series in the target environment; host-wide memory metrics alone do not prove per-process RSS. No AWS deployment or live AWS scrape was performed by this change.

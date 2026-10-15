@@ -3,3 +3,10 @@ finance:
     mode: local
     local:
       identity-user-id: test-user-rpl-50
+
+management:
+  server:
+    port: 0
+  metrics:
+    tags:
+      environment: test

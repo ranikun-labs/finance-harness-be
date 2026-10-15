@@ -11,6 +11,8 @@ services:
     stop_grace_period: 40s
     ports:
       - "${FINANCE_HTTP_BIND_ADDRESS:-0.0.0.0}:8080:8080"
+    expose:
+      - "8081"
     environment:
       FINANCE_SERVICE_NAME: finance-harness-be
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-production}
@@ -18,5 +20,8 @@ services:
       FINANCE_DB_USERNAME: ${FINANCE_DB_USERNAME:-}
       FINANCE_DB_PASSWORD: ${FINANCE_DB_PASSWORD:-}
       FINANCE_DB_APPLICATION_NAME: ${FINANCE_DB_APPLICATION_NAME:-finance-harness-be}
+      FINANCE_MANAGEMENT_PORT: 8081
+      FINANCE_MANAGEMENT_BIND_ADDRESS: 0.0.0.0
+      FINANCE_METRICS_ENVIRONMENT: production
     mem_limit: 768m
     cpus: 1.0
