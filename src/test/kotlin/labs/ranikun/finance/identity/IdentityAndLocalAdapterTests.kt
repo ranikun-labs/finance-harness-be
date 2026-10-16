@@ -4,6 +4,7 @@ import labs.ranikun.finance.identity.adapter.LocalDevCurrentUserAdapter
 import labs.ranikun.finance.identity.application.CurrentUserPort
 import labs.ranikun.finance.identity.application.IdentityUserId
 import labs.ranikun.finance.journal.application.JournalCursor
+import labs.ranikun.finance.journal.application.JournalCreateApplicationService
 import labs.ranikun.finance.journal.application.JournalDetailRecord
 import labs.ranikun.finance.journal.application.JournalListRecord
 import labs.ranikun.finance.journal.application.JournalReadApplicationService
@@ -143,7 +144,11 @@ class IdentityAndLocalAdapterTests {
     private class LocalAdapterConfiguration
 
     @Configuration(proxyBeanMethods = false)
-    @Import(LocalDevCurrentUserAdapter::class, JournalReadApplicationService::class)
+    @Import(
+        LocalDevCurrentUserAdapter::class,
+        JournalCreateApplicationService::class,
+        JournalReadApplicationService::class,
+    )
     private class ProductionJournalConfiguration {
 
         @Bean
