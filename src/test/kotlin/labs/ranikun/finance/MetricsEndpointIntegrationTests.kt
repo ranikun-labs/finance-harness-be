@@ -6,6 +6,7 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
+import org.springframework.test.util.AopTestUtils
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.context.annotation.Import
 import org.springframework.dao.DataAccessException
@@ -15,6 +16,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.boot.micrometer.metrics.test.autoconfigure.AutoConfigureMetrics
 import org.springframework.test.context.ActiveProfiles
 import java.sql.SQLException
+import java.sql.DatabaseMetaData
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -145,6 +147,32 @@ class MetricsEndpointIntegrationTests {
         assertThat(connection.hashCode()).isEqualTo(connection.hashCode())
         assertThat(connection).isEqualTo(connection)
 
+        val rawDataSource: HikariDataSource = AopTestUtils.getTargetObject(dataSource)
+        rawDataSource.connection.use { rawConnection ->
+            assertThat(connection == rawConnection).isFalse()
+            assertThat(rawConnection == connection).isFalse()
+            val rawStatement = rawConnection.createStatement()
+            val wrappedStatement = connection.createStatement()
+            try {
+                assertThat(wrappedStatement == rawStatement).isFalse()
+                assertThat(rawStatement == wrappedStatement).isFalse()
+                assertThat(wrappedStatement.hashCode()).isEqualTo(System.identityHashCode(wrappedStatement))
+                val rawResultSet = rawStatement.executeQuery("SELECT 1")
+                val wrappedResultSet = wrappedStatement.executeQuery("SELECT 1")
+                try {
+                    assertThat(wrappedResultSet == rawResultSet).isFalse()
+                    assertThat(rawResultSet == wrappedResultSet).isFalse()
+                    assertThat(wrappedResultSet.hashCode()).isEqualTo(System.identityHashCode(wrappedResultSet))
+                } finally {
+                    rawResultSet.close()
+                    wrappedResultSet.close()
+                }
+            } finally {
+                rawStatement.close()
+                wrappedStatement.close()
+            }
+        }
+
         val statement = connection.createStatement()
         assertThat(statement.hashCode()).isEqualTo(statement.hashCode())
         assertThat(statement).isEqualTo(statement)
@@ -167,6 +195,68 @@ class MetricsEndpointIntegrationTests {
         }
     }
 
+    @Test
+    fun `metadata connection path preserves wrappers and records real PostgreSQL statement execution`() {
+        val management = environment.getRequiredProperty("local.management.port").toInt()
+        val beforeScrape = get("http://127.0.0.1:$management/actuator/prometheus").body()
+        val beforeCount = scrapeSample(beforeScrape, "ranikun_db_query_duration_seconds_count{", "operation=\"execute\"") ?: 0.0
+        val beforeSum = scrapeSample(beforeScrape, "ranikun_db_query_duration_seconds_sum{", "operation=\"execute\"") ?: 0.0
+        val beforeBucket = scrapeSample(
+            beforeScrape,
+            "ranikun_db_query_duration_seconds_bucket{",
+            "operation=\"execute\"",
+            "le=\"30.0\"",
+        ) ?: 0.0
+
+        dataSource.connection.use { connection ->
+            val metadata = connection.metaData
+            assertThat(metadata.connection).isSameAs(connection)
+            assertThat(metadata.isWrapperFor(DatabaseMetaData::class.java)).isTrue()
+            assertThat(metadata.unwrap(DatabaseMetaData::class.java)).isSameAs(metadata)
+
+            val postgresMetadataType = Class.forName("org.postgresql.jdbc.PgDatabaseMetaData")
+            assertThat(metadata.isWrapperFor(postgresMetadataType)).isTrue()
+            assertThat(metadata.unwrap(postgresMetadataType)).isInstanceOf(postgresMetadataType)
+
+            metadata.getTables(null, "public", "journals", null).use { resultSet ->
+                val metadataStatement = resultSet.statement
+                if (metadataStatement != null) {
+                    assertThat(metadataStatement.connection).isSameAs(connection)
+                    assertThat(resultSet.statement).isSameAs(metadataStatement)
+                }
+            }
+
+            metadata.connection.createStatement().use { statement ->
+                assertThat(statement.connection).isSameAs(connection)
+                assertThat(statement.execute("SELECT 1")).isTrue()
+                statement.executeQuery("SELECT 1").use { resultSet ->
+                    assertThat(resultSet.statement).isSameAs(statement)
+                    assertThat(resultSet.statement.connection).isSameAs(connection)
+                }
+                val failure = assertThrows(SQLException::class.java) {
+                    statement.execute("SELECT * FROM __finance_metrics_missing_relation_7f31__")
+                }
+                assertThat(failure.javaClass.name).isEqualTo("org.postgresql.util.PSQLException")
+                assertThat(failure.sqlState).isEqualTo("42P01")
+            }
+        }
+
+        val afterScrape = get("http://127.0.0.1:$management/actuator/prometheus").body()
+        assertThat(scrapeSample(afterScrape, "ranikun_db_query_duration_seconds_count{", "operation=\"execute\"") ?: 0.0)
+            .isEqualTo(beforeCount + 2.0)
+        assertThat(scrapeSample(afterScrape, "ranikun_db_query_duration_seconds_sum{", "operation=\"execute\"") ?: 0.0)
+            .isGreaterThan(beforeSum)
+        assertThat(
+            scrapeSample(
+                afterScrape,
+                "ranikun_db_query_duration_seconds_bucket{",
+                "operation=\"execute\"",
+                "le=\"30.0\"",
+            ) ?: 0.0,
+        ).isEqualTo(beforeBucket + 2.0)
+        assertThat(afterScrape).doesNotContain("__finance_metrics_missing_relation_7f31__", "SELECT 1")
+    }
+
     private fun get(url: String): HttpResponse<String> =
         HttpClient.newHttpClient().send(
             HttpRequest.newBuilder(URI.create(url)).GET().build(),
@@ -181,4 +271,10 @@ class MetricsEndpointIntegrationTests {
             },
         ).isTrue()
     }
+
+    private fun scrapeSample(metrics: String, metric: String, vararg labels: String): Double? =
+        metrics.lineSequence()
+            .firstOrNull { line -> line.startsWith(metric) && labels.all(line::contains) }
+            ?.substringAfterLast(' ')
+            ?.toDoubleOrNull()
 }

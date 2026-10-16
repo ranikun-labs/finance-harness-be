@@ -15,6 +15,7 @@ import java.lang.reflect.Method
 import java.lang.reflect.Proxy
 import java.sql.CallableStatement
 import java.sql.Connection
+import java.sql.DatabaseMetaData
 import java.sql.PreparedStatement
 import java.sql.ResultSet
 import java.sql.SQLException
@@ -149,6 +150,13 @@ private fun instrumentConnection(
     recorderProvider: ObjectProvider<JdbcStatementDurationRecorder>,
 ): Connection = jdbcProxy(target, Connection::class.java, null, recorderProvider) as Connection
 
+private fun instrumentMetadata(
+    target: DatabaseMetaData,
+    connectionProxy: Connection,
+    recorderProvider: ObjectProvider<JdbcStatementDurationRecorder>,
+): DatabaseMetaData =
+    jdbcProxy(target, DatabaseMetaData::class.java, connectionProxy, recorderProvider) as DatabaseMetaData
+
 private fun instrumentStatement(
     target: Statement,
     connectionProxy: Connection,
@@ -164,9 +172,9 @@ private fun instrumentStatement(
 
 private fun instrumentResultSet(
     target: ResultSet,
-    statementProxy: Statement,
+    parentProxy: Any,
     recorderProvider: ObjectProvider<JdbcStatementDurationRecorder>,
-): ResultSet = jdbcProxy(target, ResultSet::class.java, statementProxy, recorderProvider) as ResultSet
+): ResultSet = jdbcProxy(target, ResultSet::class.java, parentProxy, recorderProvider) as ResultSet
 
 private fun jdbcProxy(
     target: Any,
@@ -184,12 +192,14 @@ private class JdbcInvocationHandler(
     private val parentProxy: Any?,
     private val recorderProvider: ObjectProvider<JdbcStatementDurationRecorder>,
 ) : InvocationHandler, JdbcProxyMarker {
+    private var metadataResultStatementResolved = false
+    private var metadataResultStatementProxy: Statement? = null
 
     override fun invoke(proxy: Any, method: Method, args: Array<out Any?>?): Any? {
         when (method.name) {
-            "equals" -> return proxyEquals(proxy, args?.firstOrNull())
-            "hashCode" -> return System.identityHashCode(jdbcTarget)
-            "toString" -> return "${primaryInterface.simpleName}Proxy@${System.identityHashCode(jdbcTarget).toString(16)}"
+            "equals" -> return proxy === args?.firstOrNull()
+            "hashCode" -> return System.identityHashCode(proxy)
+            "toString" -> return "${primaryInterface.simpleName}Proxy@${System.identityHashCode(proxy).toString(16)}"
             "unwrap" -> {
                 val requested = args?.firstOrNull() as? Class<*>
                 if (requested != null && requested.isInstance(proxy)) return proxy
@@ -203,8 +213,21 @@ private class JdbcInvocationHandler(
         if (jdbcTarget is Statement && method.name == "getConnection" && parentProxy is Connection) {
             return parentProxy
         }
-        if (jdbcTarget is ResultSet && method.name == "getStatement" && parentProxy is Statement) {
+        if (jdbcTarget is DatabaseMetaData && method.name == "getConnection" && parentProxy is Connection) {
             return parentProxy
+        }
+        if (jdbcTarget is ResultSet && method.name == "getStatement") {
+            if (parentProxy is Statement) return parentProxy
+            if (parentProxy is Connection) {
+                if (!metadataResultStatementResolved) {
+                    val statement = invokeJdbc(jdbcTarget, method, args) as Statement?
+                    metadataResultStatementProxy = statement?.let {
+                        instrumentStatement(it, parentProxy, recorderProvider)
+                    }
+                    metadataResultStatementResolved = true
+                }
+                return metadataResultStatementProxy
+            }
         }
 
         val execution = method.name in STATEMENT_EXECUTION_METHODS && jdbcTarget is Statement
@@ -216,7 +239,13 @@ private class JdbcInvocationHandler(
                 return instrumentStatement(result, proxy as Connection, recorderProvider)
             }
             if (result is ResultSet && jdbcTarget is Statement && parentProxy is Connection) {
-                return instrumentResultSet(result, proxy as Statement, recorderProvider)
+                return instrumentResultSet(result, proxy, recorderProvider)
+            }
+            if (result is DatabaseMetaData && jdbcTarget is Connection && parentProxy == null) {
+                return instrumentMetadata(result, proxy as Connection, recorderProvider)
+            }
+            if (result is ResultSet && jdbcTarget is DatabaseMetaData && parentProxy is Connection) {
+                return instrumentResultSet(result, parentProxy, recorderProvider)
             }
             return result
         } catch (error: Throwable) {
@@ -229,11 +258,6 @@ private class JdbcInvocationHandler(
         }
     }
 
-    private fun proxyEquals(proxy: Any, other: Any?): Boolean {
-        if (proxy === other) return true
-        val otherTarget = underlyingJdbcTarget(other)
-        return otherTarget === jdbcTarget
-    }
 }
 
 private fun invokeJdbc(target: Any, method: Method, args: Array<out Any?>?): Any? = try {
