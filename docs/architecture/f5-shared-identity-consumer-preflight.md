@@ -77,3 +77,18 @@ Owner 승인 시에도 **F5 Backend adapter Slice**만 착수하며, Finance FE 
 | F5-08 | Gateway route 경계 | Finance 요청이 Carelog로 넘어가지 않고, public Auth는 Identity로만 이동 |
 
 **실행 결과:** NOT_RUN. 기존 #10의 31 PASS는 Journal owner isolation 검증이지, 위 8개 운영 인증 E2E의 PASS가 아니다.
+
+## 8. Token Provider 직접 대조 — 기존 발급 JWT와 Draft 계약 차이 (2026-10-22)
+
+현재 `platform-services/main`의 아래 **발급과 검증 소스**를 서로 대조한 결과다.
+
+- [Identity JwtTokenProvider](https://github.com/ranikun-labs/platform-services/blob/main/platform-core/identity/src/main/java/com/ranikunlabs/platform/identity/adapter/token/JwtTokenProvider.java): `generateAccessToken()`은 `sub=accountId`, `organizationId`, `role`, `publicId`, `iat`, `exp`, 대칭키 서명을 사용한다. **`iss`, `aud`, `jti`를 발급하지 않는다.** `generateRefreshToken()`에는 `jti` 성격의 `.id(UUID)`가 있지만 Access Token과 별도다.
+- [Gateway JwtVerifier](https://github.com/ranikun-labs/platform-services/blob/main/gateway-app/src/main/kotlin/com/ranikunlabs/platform/gateway/filter/JwtVerifier.kt): 대칭키 서명을 검증하고 Signed Claims를 파싱하지만, 현재 코드에 기대 issuer/audience의 명시적 검증이 없다.
+- [Gateway JwtGlobalFilter](https://github.com/ranikun-labs/platform-services/blob/main/gateway-app/src/main/kotlin/com/ranikunlabs/platform/gateway/filter/JwtGlobalFilter.kt): 현행 Carelog-specific 조직·역할·publicId Claims를 Product로 전달한다. Finance Product 권한을 이 역할 Claim에 자동 위임하지 않는다.
+- [Draft Shared Identity Token Contract](https://github.com/ranikun-labs/harness-foundation-docs/blob/main/docs/contracts/backend-service-foundation/identity-token-contract.md): `iss/sub/aud/iat/exp/jti` 필수 및 Product별 `aud` 검증을 목표로 하나 아직 **Draft**, Production 적용 증거가 아니다.
+
+**검증 결론:** 현행 Access JWT가 Draft의 필수 Claims 전부를 충족한다고 주장할 수 없다. 아직 Finance용 JWT를 발급하거나 `finance-api` Audience를 검증하는 구현이 확인되지 않는다. 이 문서는 현재 발급된 JWT로 F5 Production Adapter를 신뢰해도 된다는 승인이 **아니다**.
+
+**F5-D2 필수 결정**: (a) Issuer·Finance Audience·Access JTI/폐기정책의 채택 여부, (b) Carelog 기존 Access Token과의 단계적 공존/이행 방안, (c) Gateway 대 Finance 검증 의무의 정확한 위치, (d) 누락/다른 Audience/구 버전 토큰의 Fail-closed 판정을 함께 정한다. 특히 `iss/aud`를 갑자기 Required로 바꾸면 기존 Carelog 토큰의 호환성에 영향이 있으므로 별도 배포·롤백 Gate로 관리한다.
+
+관련 구현은 `platform-services` 내 소유자가 명시된 별도 Slice에서 처리하며, Finance Journal DB·Idempotency 구현을 변경하지 않는다. **이번 검증은 소스 대조만 수행했고, 실제 JWT Test/Runtime E2E는 NOT_RUN.**
