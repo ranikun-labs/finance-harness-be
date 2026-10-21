@@ -92,3 +92,22 @@ Owner 승인 시에도 **F5 Backend adapter Slice**만 착수하며, Finance FE 
 **F5-D2 필수 결정**: (a) Issuer·Finance Audience·Access JTI/폐기정책의 채택 여부, (b) Carelog 기존 Access Token과의 단계적 공존/이행 방안, (c) Gateway 대 Finance 검증 의무의 정확한 위치, (d) 누락/다른 Audience/구 버전 토큰의 Fail-closed 판정을 함께 정한다. 특히 `iss/aud`를 갑자기 Required로 바꾸면 기존 Carelog 토큰의 호환성에 영향이 있으므로 별도 배포·롤백 Gate로 관리한다.
 
 관련 구현은 `platform-services` 내 소유자가 명시된 별도 Slice에서 처리하며, Finance Journal DB·Idempotency 구현을 변경하지 않는다. **이번 검증은 소스 대조만 수행했고, 실제 JWT Test/Runtime E2E는 NOT_RUN.**
+
+## 9. 승인된 Finance 정본과 구현 Gate 대조 (2026-10-22)
+
+다음은 **별도 승인된 Finance 아키텍처 정본**이다. 이 문서의 Owner 후보안보다 우선해 적용한다.
+
+| 정본 | 채택된 부분 | 미채택·미완료 |
+| --- | --- | --- |
+| [Finance ADR-002](https://github.com/ranikun-labs/finance-harness-architecture/blob/main/adr/ADR-002-shared-identity-consumer-boundary.md) (Accepted) | Shared Identity의 stable, opaque `identityUserId`만 `CurrentUserPort`로 사용, Finance 데이터/권한은 Product 소유, Shared DB 직접 접근 금지, LocalDev→Production fallback 금지 | JWT `iss/aud`, Gateway→Finance trusted wire, session, final route는 **Deferred** |
+| [Identity Consumer Contract](https://github.com/ranikun-labs/finance-harness-architecture/blob/main/contracts/identity-consumer.md) (Accepted **semantic only**) | Product의 소유권 검사, 매 요청 신뢰 가능한 Identity context, Fail-closed | 헤더/토큰/쿠키/서비스 인증 메커니즘은 승인하지 않음 |
+| [Finance ADR-004](https://github.com/ranikun-labs/finance-harness-architecture/blob/main/adr/ADR-004-production-activation-gates.md) (Accepted) | Production 활성화는 G4·RPL-27·F5/F6 소비자 검증과 별도 Owner Gate를 통과해야 함 | 2026-08-12 작성 문서에 남아 있는 `Raw List/Detail`·멱등성 미구현 표기는 **당시 관찰 이력**. 현재 RPL-84/96 및 BE 코드를 다시 대조했으므로 최신 구현 상태로 오인하지 않음 |
+
+### F5 구현 착수 전 정확한 선행 조건
+
+1. **이미 확정된 것은 재승인하지 않는다:** AccountId의 opaque semantics, `CurrentUserPort`, Finance-owned authorization/owner predicate, production fixed-user 금지.
+2. **실제 미결정만 Owner가 결정한다:** D1 Gateway vs Product JWT 신뢰 경계, D2 발급/검증 Token Version·Issuer/Audience·회전·Legacy 호환, D3 Web/Capacitor Session transport, D4 Finance Gateway ingress 및 에러 경계.
+3. **선행 Gates는 구별한다:** G4 미완료가 F5 계약 준비를 금지하지는 않지만 **Production 활성화/E2E PASS를 허용하지 않는다**. `carelog-be#52`·`finance-harness-be#10` Draft와 `platform-services#30/#33/#32` HOLD는 별도 Owner Merge 경계.
+4. **검증 후 착수:** 선택된 Trusted Wire만 소비하는 Finance Product Adapter와 negative tests를 작은 별도 구현 Slice로 분리한다. 현재 F5 계약 Draft 자체를 구현/배포 승인으로 취급하지 않는다.
+
+이번 정본 교차검증은 문서·Source READ-ONLY 결과이며 **실제 새 Runtime E2E나 운영 JWT 검증을 실행한 증거가 아니다**.
