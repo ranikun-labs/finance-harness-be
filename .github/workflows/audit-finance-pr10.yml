@@ -1,0 +1,20 @@
+name: Disposable Finance PR10 ownership integration
+on:
+  push:
+    branches: ['audit/product-finance-pr10-20261023']
+permissions:
+  contents: read
+jobs:
+  journal-ownership:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Journal ownership and idempotency isolation integration tests
+        run: ./gradlew test --tests 'labs.ranikun.finance.journal.web.JournalIdempotencyOwnerIntegrationTests' --no-daemon --stacktrace
