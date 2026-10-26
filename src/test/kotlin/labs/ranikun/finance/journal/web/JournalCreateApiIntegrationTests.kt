@@ -16,6 +16,7 @@ import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import tools.jackson.databind.MapperFeature
 import tools.jackson.databind.json.JsonMapper
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
@@ -82,6 +83,26 @@ class JournalCreateApiIntegrationTests {
             String::class.java,
             UUID.fromString(journalId),
         )).isEqualTo("test-user-rpl-50")
+    }
+
+    @Test
+    fun investmentCreateReturnsIdIncludedInPersistedOwnerScopedList() {
+        val created = mockMvc.perform(
+            post("/finance/journals")
+                .contentType(MediaType.APPLICATION_JSON)
+                .header("Idempotency-Key", nextIdempotencyKey())
+                .content(investmentJson()),
+        )
+            .andExpect(status().isCreated)
+            .andExpect(jsonPath("$.journalId").isNotEmpty)
+            .andReturn()
+        val journalId = jsonMapper.readTree(created.response.contentAsString).get("journalId").stringValue()
+
+        mockMvc.perform(get("/finance/journals").param("limit", "10"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.items.length()").value(1))
+            .andExpect(jsonPath("$.items[0].journalId").value(journalId))
+            .andExpect(jsonPath("$.items[0].assetName").value("ETF"))
     }
 
     @Test
