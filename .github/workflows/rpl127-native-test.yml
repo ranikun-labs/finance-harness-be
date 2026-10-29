@@ -1,0 +1,32 @@
+name: RPL-127 Finance Native Test
+
+on:
+  push:
+    branches:
+      - codex/rpl127-ai-general-analysis
+
+permissions:
+  contents: read
+
+jobs:
+  finance-native-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout pushed source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Temurin JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Verify checked out source SHA
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Run Finance native tests
+        run: ./gradlew test --no-daemon --stacktrace --console=plain
