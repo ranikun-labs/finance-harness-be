@@ -1,0 +1,89 @@
+name: RPL-127 Finance to Shared AI Live HTTP Integration
+
+on:
+  push:
+    branches:
+      - recovery/f4-rpl127
+
+permissions:
+  contents: read
+
+jobs:
+  live-http-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: platform
+          POSTGRES_USER: integration_test
+          POSTGRES_PASSWORD: disposable-integration-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U integration_test -d platform"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout Finance recovery source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set up Temurin JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Verify Finance source SHA
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Checkout pinned Shared AI recovery source
+        run: |
+          git clone --quiet --depth 1 --branch recovery/f4-rpl126 https://github.com/ranikun-labs/platform-services.git "$RUNNER_TEMP/platform-services"
+          git -C "$RUNNER_TEMP/platform-services" checkout --quiet --detach 34b5cca164b0acdb364dfb58c6648a9e400c3a47
+          test "$(git -C "$RUNNER_TEMP/platform-services" rev-parse HEAD)" = "34b5cca164b0acdb364dfb58c6648a9e400c3a47"
+      - name: Run real two-JVM Finance to Shared AI HTTP contract
+        shell: bash
+        env:
+          PLATFORM_CORE_PORT: '18080'
+          PLATFORM_CORE_MANAGEMENT_PORT: '18081'
+          PLATFORM_IDENTITY_PERSISTENCE_ENABLED: 'true'
+          PLATFORM_IDENTITY_DATASOURCE_URL: jdbc:postgresql://127.0.0.1:5432/platform
+          PLATFORM_IDENTITY_DATASOURCE_USERNAME: integration_test
+          PLATFORM_IDENTITY_DATASOURCE_PASSWORD: disposable-integration-only
+          PLATFORM_IDENTITY_AUTH_ENABLED: 'false'
+          SHARED_AI_FOUNDATION_ENABLED: 'true'
+          SHARED_AI_SPRING_AI_ENABLED: 'false'
+          PLATFORM_SHARED_AI_HTTP_LOCAL_TEST_ENABLED: 'true'
+          SPRING_PROFILES_ACTIVE: test
+          FINANCE_SHARED_AI_TEST_URL: http://127.0.0.1:18080
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/platform-services"
+          setsid ./gradlew -p platform-core :app:bootRun --no-daemon --stacktrace --console=plain --args='--spring.profiles.active=test' > "$RUNNER_TEMP/shared-ai-app.log" 2>&1 &
+          platform_pid=$!
+          cleanup() {
+            kill -- "-$platform_pid" 2>/dev/null || kill "$platform_pid" 2>/dev/null || true
+            wait "$platform_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          ready=false
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18081/actuator/health >/dev/null; then
+              ready=true
+              break
+            fi
+            if ! kill -0 "$platform_pid" 2>/dev/null; then
+              echo "Shared AI test process exited before readiness."
+              exit 1
+            fi
+            sleep 5
+          done
+          if [ "$ready" != true ]; then
+            echo "Shared AI test process did not become ready."
+            exit 1
+          fi
+          cd "$GITHUB_WORKSPACE"
+          ./gradlew test --no-daemon --stacktrace --console=plain --tests labs.ranikun.finance.generalanalysis.adapter.FinanceSharedAiHttpLiveIntegrationTest
