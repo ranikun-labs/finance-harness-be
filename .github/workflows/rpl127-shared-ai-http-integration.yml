@@ -39,11 +39,24 @@ jobs:
           java-version: '21'
       - name: Verify Finance source SHA
         run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-      - name: Checkout pinned Shared AI recovery source
+      - name: Download and verify pinned Shared AI source snapshot
+        shell: bash
         run: |
-          git clone --quiet --depth 1 --branch recovery/f4-rpl126 https://github.com/ranikun-labs/platform-services.git "$RUNNER_TEMP/platform-services"
-          git -C "$RUNNER_TEMP/platform-services" checkout --quiet --detach 34b5cca164b0acdb364dfb58c6648a9e400c3a47
-          test "$(git -C "$RUNNER_TEMP/platform-services" rev-parse HEAD)" = "34b5cca164b0acdb364dfb58c6648a9e400c3a47"
+          set -euo pipefail
+          archive="$RUNNER_TEMP/platform-services.zip"
+          unpack="$RUNNER_TEMP/platform-services-source"
+          curl --fail --silent --show-error --location "https://codeload.github.com/ranikun-labs/platform-services/zip/34b5cca164b0acdb364dfb58c6648a9e400c3a47" -o "$archive"
+          mkdir -p "$unpack"
+          unzip -q "$archive" -d "$unpack"
+          platform_dir="$(find "$unpack" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+          test -n "$platform_dir"
+          chmod +x "$platform_dir/gradlew" "$platform_dir/scripts/test-valkey-compose-recovery.sh"
+          git -C "$platform_dir" init -q
+          git -C "$platform_dir" add -f -A
+          fetched_tree="$(git -C "$platform_dir" write-tree)"
+          test "$fetched_tree" = "2a8bb4d28f13b8e6c23d851ed0d2167504436530"
+          printf 'Shared AI snapshot tree verified: %s\n' "$fetched_tree"
+          echo "PLATFORM_SOURCE_DIR=$platform_dir" >> "$GITHUB_ENV"
       - name: Run real two-JVM Finance to Shared AI HTTP contract
         shell: bash
         env:
@@ -61,7 +74,7 @@ jobs:
           FINANCE_SHARED_AI_TEST_URL: http://127.0.0.1:18080
         run: |
           set -euo pipefail
-          cd "$RUNNER_TEMP/platform-services"
+          cd "$PLATFORM_SOURCE_DIR"
           setsid ./gradlew -p platform-core :app:bootRun --no-daemon --stacktrace --console=plain --args='--spring.profiles.active=test' > "$RUNNER_TEMP/shared-ai-app.log" 2>&1 &
           platform_pid=$!
           cleanup() {
