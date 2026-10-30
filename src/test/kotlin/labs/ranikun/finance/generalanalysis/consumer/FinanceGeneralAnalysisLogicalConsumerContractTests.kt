@@ -170,7 +170,7 @@ class FinanceGeneralAnalysisLogicalConsumerContractTests {
         val fixture = fixture()
         val order = mutableListOf<String>()
         val consumer = RecordingLogicalConsumer(fixture.context, order)
-        val prohibitedCandidate = safeCandidate().copy(summary = "Acquiring shares now makes sense.")
+        val prohibitedCandidate = safeCandidate().copy(summary = "Acquiring shares now is a smart choice.")
         val adapter = adapter(fixture, consumer, order, prohibitedCandidate)
         val service = service(adapter, safePolicy(), order)
         val question = service.createQuestion(fixture.question)

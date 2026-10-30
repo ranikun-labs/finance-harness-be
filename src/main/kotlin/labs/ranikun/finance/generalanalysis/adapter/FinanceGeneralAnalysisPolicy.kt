@@ -21,11 +21,15 @@ class FinanceGeneralAnalysisPolicyGuard : GeneralAnalysisPolicyGuard {
         val RISK_DECISION_PATTERN = Regex(
             "\\b(buy|sell|hold|purchase|recommend(?:ation)?|price target|target price|should i invest|" +
                 "should i make an investment|good investment|investment recommendation)\\b|" +
-                "\\b(acquir(?:e|ing|ed|es)|purchas(?:e|ing|ed|es)|buy(?:ing)?)\\b.{0,80}" +
+                "\\b(acquir(?:e|ing|ed|es)|accumulat(?:e|ing|ed|es)|purchas(?:e|ing|ed|es)|" +
+                "buy(?:ing)?|add(?:ing|ed|s)?|load(?:ing)?\\s+up\\s+on)\\b.{0,80}" +
                 "\\b(shares?|stock|equities|securities)\\b.{0,80}" +
-                "\\b(wise|prudent|makes sense|sensible|a good idea|a good choice|a smart move)\\b|" +
-                "\\b(wise|prudent|makes sense|sensible|a good idea|a good choice|a smart move)\\b.{0,80}" +
-                "\\b(acquir(?:e|ing|ed|es)|purchas(?:e|ing|ed|es)|buy(?:ing)?)\\b.{0,80}" +
+                "\\b(wise|prudent|makes sense|sensible|(?:a )?(?:good|smart|wise|sound)\\s+" +
+                "(?:idea|choice|move|decision))\\b|" +
+                "\\b(wise|prudent|makes sense|sensible|(?:a )?(?:good|smart|wise|sound)\\s+" +
+                "(?:idea|choice|move|decision))\\b.{0,80}" +
+                "\\b(acquir(?:e|ing|ed|es)|accumulat(?:e|ing|ed|es)|purchas(?:e|ing|ed|es)|" +
+                "buy(?:ing)?|add(?:ing|ed|s)?|load(?:ing)?\\s+up\\s+on)\\b.{0,80}" +
                 "\\b(shares?|stock|equities|securities)\\b|" +
                 "매수|매도|사도 돼|팔아도 돼|보유해|추천|목표가|얼마까지 오를",
             RegexOption.IGNORE_CASE,
