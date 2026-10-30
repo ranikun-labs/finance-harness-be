@@ -21,6 +21,11 @@ class FinanceGeneralAnalysisPolicyGuard : GeneralAnalysisPolicyGuard {
         val RISK_DECISION_PATTERN = Regex(
             "\\b(buy|sell|hold|purchase|recommend(?:ation)?|price target|target price|should i invest|" +
                 "should i make an investment|good investment|investment recommendation)\\b|" +
+                "\\b(acquir(?:e|ing|ed|es)|purchas(?:e|ing|ed|es)|buy(?:ing)?)\\b.{0,80}" +
+                "\\b(shares?|stock|equities|securities)\\b.{0,80}\\b(wise|prudent|a good idea)\\b|" +
+                "\\b(wise|prudent|a good idea)\\b.{0,80}" +
+                "\\b(acquir(?:e|ing|ed|es)|purchas(?:e|ing|ed|es)|buy(?:ing)?)\\b.{0,80}" +
+                "\\b(shares?|stock|equities|securities)\\b|" +
                 "매수|매도|사도 돼|팔아도 돼|보유해|추천|목표가|얼마까지 오를",
             RegexOption.IGNORE_CASE,
         )
