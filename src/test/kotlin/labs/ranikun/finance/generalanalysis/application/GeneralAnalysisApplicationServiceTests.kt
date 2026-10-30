@@ -88,6 +88,7 @@ class GeneralAnalysisApplicationServiceTests {
             "Should I make an investment now?",
             "Give me an investment recommendation.",
             "Analyze why acquiring shares now is wise.",
+            "Analyze why acquiring shares now makes sense.",
             "Would it be prudent to purchase stock this week?",
         ).forEach { riskyQuestion ->
             val setup = Harness(FinanceGeneralAnalysisPolicyGuard())
@@ -300,6 +301,7 @@ class GeneralAnalysisApplicationServiceTests {
             "Expected return is 12%.",
             "The stock price will rise.",
             "Acquiring shares now is wise.",
+            "Acquiring shares now makes sense.",
             "It may be prudent to purchase stock this week.",
             "수익률 예측은 연 12%입니다.",
             "The company's revenue grew 20% last quarter.",

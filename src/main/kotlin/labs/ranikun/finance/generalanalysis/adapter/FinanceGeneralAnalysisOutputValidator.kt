@@ -28,8 +28,9 @@ class FinanceGeneralAnalysisOutputValidator : GeneralAnalysisOutputValidator {
                 "expected return|projected return|stock price|market share|revenue|earnings|yield|dividend|" +
                 "inflation|interest rate|will rise|will fall|forecast)\\b|" +
                 "\\b(acquir(?:e|ing|ed|es)|purchas(?:e|ing|ed|es)|buy(?:ing)?)\\b.{0,80}" +
-                "\\b(shares?|stock|equities|securities)\\b.{0,80}\\b(wise|prudent|a good idea)\\b|" +
-                "\\b(wise|prudent|a good idea)\\b.{0,80}" +
+                "\\b(shares?|stock|equities|securities)\\b.{0,80}" +
+                "\\b(wise|prudent|makes sense|sensible|a good idea|a good choice|a smart move)\\b|" +
+                "\\b(wise|prudent|makes sense|sensible|a good idea|a good choice|a smart move)\\b.{0,80}" +
                 "\\b(acquir(?:e|ing|ed|es)|purchas(?:e|ing|ed|es)|buy(?:ing)?)\\b.{0,80}" +
                 "\\b(shares?|stock|equities|securities)\\b|" +
                 "매수|매도|보유|추천|투자|비중|진입가|청산가|목표가|목표 주가|수익률\\s*예측|" +
