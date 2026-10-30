@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - codex/rpl127-ai-general-analysis
+      - recovery/f4-rpl127
 
 permissions:
   contents: read
