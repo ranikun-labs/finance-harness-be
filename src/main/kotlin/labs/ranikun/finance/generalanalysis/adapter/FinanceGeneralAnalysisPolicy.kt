@@ -11,7 +11,9 @@ import org.springframework.stereotype.Component
 @Profile("!prod & !production & (local | test)")
 class FinanceGeneralAnalysisPolicyGuard : GeneralAnalysisPolicyGuard {
     override fun classify(question: String): PolicyClassification = when {
-        RISK_DECISION_PATTERN.containsMatchIn(question) -> PolicyClassification.RISK_DECISION
+        RISK_DECISION_PATTERN.containsMatchIn(question) ||
+            DIRECT_EQUITY_ACTION_PATTERN.containsMatchIn(question) ||
+            DIRECT_SHORT_SYMBOL_HOW_TO_PATTERN.containsMatchIn(question) -> PolicyClassification.RISK_DECISION
         UNKNOWN_INTENT_PATTERN.containsMatchIn(question) -> PolicyClassification.UNKNOWN
         SAFE_GENERAL_PATTERN.containsMatchIn(question) -> PolicyClassification.SAFE_GENERAL
         else -> PolicyClassification.UNKNOWN
@@ -33,6 +35,38 @@ class FinanceGeneralAnalysisPolicyGuard : GeneralAnalysisPolicyGuard {
                 "\\b(shares?|stock|equity|equities|securities)\\b|" +
                 "매수|매도|사도 돼|팔아도 돼|보유해|추천|목표가|얼마까지 오를",
             RegexOption.IGNORE_CASE,
+        )
+        val DIRECT_EQUITY_ACTION_PATTERN = Regex(
+            "\\b(acquir(?:e|ing|ed|es)|accumulat(?:e|ing|ed|es)|purchas(?:e|ing|ed|es)|" +
+                "buy(?:ing)?|sell(?:ing|s)?|hold(?:ing|s)?|add(?:ing|ed|s)?|load(?:ing)?\\s+up\\s+on|" +
+                "invest(?:s|ing|ed)?|trad(?:e|es|ing|ed))\\b.*\\b(shares?|stock|equity|equities|securities)\\b|" +
+                "\\b(shares?|stock|equity|equities|securities)\\b.*" +
+                "\\b(acquir(?:e|ing|ed|es)|accumulat(?:e|ing|ed|es)|purchas(?:e|ing|ed|es)|" +
+                "buy(?:ing)?|sell(?:ing|s)?|hold(?:ing|s)?|add(?:ing|ed|s)?|load(?:ing)?\\s+up\\s+on|" +
+                "invest(?:s|ing|ed)?|trad(?:e|es|ing|ed))\\b",
+            setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+        )
+        val DIRECT_SHORT_SYMBOL_HOW_TO_PATTERN = Regex(
+            "(?i:^\\s*how\\s+(?:do|does|did|can|could|would|should)\\s+(?:i|we|you|one)\\b.*" +
+                "\\b(?:acquir(?:e|ing|ed|es)|accumulat(?:e|ing|ed|es)|purchas(?:e|ing|ed|es)|" +
+                "buy(?:ing)?|sell(?:ing|s)?|hold(?:ing|s)?|add(?:ing|ed|s)?|load(?:ing)?\\s+up\\s+on|" +
+                "invest(?:s|ing|ed)?|trad(?:e|es|ing|ed))\\b\\s+)(?:(?i:" +
+                "a|an|the|my|our|your|their|some|any|this|that|new|more|better|basic|useful|valuable|practical|" +
+                "advanced|fractional|existing|available|individual|particular|currently|registered|preferred|" +
+                "common|publicly\\s+traded|low[- ]priced|small[- ]cap|large[- ]cap|penny|in|for|with|from|about|" +
+                "into|on|at|to|by|via|of|off|up|over|under|after|before" +
+                ")\\s+)*(?:(?-i:[A-Z][A-Z0-9.-]{1,5})(?!\\s+(?i:(?:(?:design|technical|basic|advanced|new|practical)\\s+)*(?:skills?|knowledge|learning|experience|training|" +
+                "course|courses|tutorial|tutorials|documentation|document|query|queries|programming|system|" +
+                "systems|software|service|services|tool|tools|framework|frameworks|concept|concepts|docs|" +
+                "certification|certifications|credentials?)\\b))|(?!(?i:" +
+                "a|an|the|my|our|your|their|some|any|this|that|new|more|better|basic|useful|valuable|practical|" +
+                "advanced|fractional|existing|available|individual|particular|currently|registered|preferred|" +
+                "common|publicly\\s+traded|low[- ]priced|small[- ]cap|large[- ]cap|penny|key|keys|it|time|data|" +
+                "food|lunch|dinner|coffee|book|phone|house|team|group|task|goal|plan|item|items|skill|skills|" +
+                "knowledge|learning|experience|context|details|sql|api|pdf|html|json|url|slowly|gradually|" +
+                "carefully|regularly|steadily|weekly|monthly|daily|rapidly|promptly" +
+                ")\\b)[A-Za-z0-9][A-Za-z0-9.-]{1,5})\\b.*[?.!]?$",
+            setOf(RegexOption.DOT_MATCHES_ALL),
         )
         val UNKNOWN_INTENT_PATTERN = Regex(
             "\\b(whether\\s+(i|we)\\s+should|should i get in|should i make a move|should i do it|" +

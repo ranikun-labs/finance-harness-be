@@ -88,6 +88,28 @@ class GeneralAnalysisApplicationServiceTests {
             "Should I make an investment now?",
             "Give me an investment recommendation.",
             "Analyze why acquiring shares now is wise.",
+            "How do I acquire shares?",
+            "How do I acquire AAPL?",
+            "How can we acquire aapl?",
+            "How can we acquire aapl gradually?",
+            "How can we acquire aapl through a broker?",
+            "How can we acquire aapl slowly?",
+            "How can we acquire aapl over time?",
+            "How can we acquire KEY slowly?",
+            "How can we acquire IT slowly?",
+            "How can we acquire TEAM slowly?",
+            "How can we acquire ON slowly?",
+            "How can we acquire API slowly?",
+            "How can we acquire SQL slowly?",
+            "How can we acquire the aapl slowly?",
+            "How can I acquire my aapl over time?",
+            "How can we acquire the new advanced aapl slowly?",
+            "How can we acquire fractional aapl over time?",
+            "How do I invest in AAPL?",
+            "How can I invest in aapl?",
+            "How do I acquire ${"details and relevant context ".repeat(5)} shares?",
+            "How can I purchase AAPL common equity?",
+            "Tell me how to accumulate shares through a broker.",
             "Analyze why acquiring AAPL common equity now is wise.",
             "Analyze why acquiring shares now makes sense.",
             "Analyze why acquiring shares now is a smart choice.",
@@ -139,6 +161,29 @@ class GeneralAnalysisApplicationServiceTests {
         val policyGuard = FinanceGeneralAnalysisPolicyGuard()
         val questionText = "How can I verify this claim?"
         assertThat(policyGuard.classify(questionText)).isEqualTo(PolicyClassification.SAFE_GENERAL)
+        listOf(
+            "What is stock investment?",
+            "How do I invest my time in learning?",
+            "How can I acquire knowledge of budgeting?",
+            "How can we acquire SQL skills?",
+            "How can we acquire skills?",
+            "How can we acquire skills slowly?",
+            "How can we acquire new skills?",
+            "How can we acquire new practical skills?",
+            "How can we acquire more skills?",
+            "How can we acquire lunch?",
+            "How can we acquire key skills?",
+            "How can we acquire KEY skills?",
+            "How can we acquire fractional skills slowly?",
+            "How can we acquire skills at work?",
+            "How can we acquire IT skills?",
+            "How can we acquire API skills?",
+            "How can we acquire API design skills?",
+        ).forEach { safeQuestion ->
+            assertThat(policyGuard.classify(safeQuestion))
+                .describedAs(safeQuestion)
+                .isEqualTo(PolicyClassification.SAFE_GENERAL)
+        }
 
         val setup = Harness(policyGuard)
         val question = setup.service.createQuestion(questionText)
@@ -276,24 +321,47 @@ class GeneralAnalysisApplicationServiceTests {
 
     @Test
     fun prohibitedAdviceInCandidateFailsValidationWithoutExposingCandidate() {
-        val setup = Harness()
-        val question = setup.service.createQuestion("Summarize the information available.")
-        setup.service.confirmChecklist(question.questionId, question.checklistId, emptySet(), true)
-        setup.execution.result = GeneralAnalysisExecutionResult.Success(
-            GeneralAnalysisCandidate(
-                summary = "You should buy now.",
-                observations = listOf("The question asks for a summary."),
-                assumptions = listOf("No external data was supplied."),
-                nextChecks = listOf("Verify facts with a primary source."),
-                evidenceNote = "Source: user-provided question only.",
-            ),
-        )
+        listOf(
+            "You should buy now.",
+            "Acquire AAPL shares through a broker.",
+            "Acquire AAPL through a broker.",
+            "Acquire aapl through a broker.",
+            "Acquire aapl.",
+            "Acquire aapl gradually.",
+            "Acquire aapl slowly.",
+            "Acquire aapl over time.",
+            "Acquire KEY slowly.",
+            "Acquire IT slowly.",
+            "Acquire TEAM slowly.",
+            "Acquire ON slowly.",
+            "Acquire API slowly.",
+            "Acquire SQL slowly.",
+            "Acquire the aapl slowly.",
+            "Acquire my aapl over time.",
+            "Acquire the new advanced aapl slowly.",
+            "Acquire fractional aapl over time.",
+            "Acquire aapl for my portfolio over time.",
+            "Acquire ${"details ".repeat(15)} shares through a broker.",
+        ).forEach { prohibitedText ->
+            val setup = Harness()
+            val question = setup.service.createQuestion("Summarize the information available.")
+            setup.service.confirmChecklist(question.questionId, question.checklistId, emptySet(), true)
+            setup.execution.result = GeneralAnalysisExecutionResult.Success(
+                GeneralAnalysisCandidate(
+                    summary = prohibitedText,
+                    observations = listOf("The question asks for a summary."),
+                    assumptions = listOf("No external data was supplied."),
+                    nextChecks = listOf("Verify facts with a primary source."),
+                    evidenceNote = "Source: user-provided question only.",
+                ),
+            )
 
-        val result = setup.service.analyze(question.questionId, question.checklistId)
+            val result = setup.service.analyze(question.questionId, question.checklistId)
 
-        assertThat(result.status).isEqualTo(GeneralAnalysisStatus.FAILED)
-        assertThat(result.output).isNull()
-        assertThat(setup.service.findAnalysis(result.analysisId).output).isNull()
+            assertThat(result.status).describedAs(prohibitedText).isEqualTo(GeneralAnalysisStatus.FAILED)
+            assertThat(result.output).describedAs(prohibitedText).isNull()
+            assertThat(setup.service.findAnalysis(result.analysisId).output).describedAs(prohibitedText).isNull()
+        }
     }
 
     @Test
@@ -304,6 +372,16 @@ class GeneralAnalysisApplicationServiceTests {
             "Expected return is 12%.",
             "The stock price will rise.",
             "Acquiring shares now is wise.",
+            "Acquire AAPL shares through a broker.",
+            "Acquire AAPL through a broker.",
+            "Acquire aapl through a broker.",
+            "Acquire aapl.",
+            "Acquire aapl gradually.",
+            "Acquire aapl slowly.",
+            "Acquire the new advanced aapl slowly.",
+            "Acquire fractional aapl over time.",
+            "Acquire shares through a broker.",
+            "Acquire ${"details ".repeat(15)} shares through a broker.",
             "Acquiring AAPL common equity now is wise.",
             "Acquiring shares now makes sense.",
             "Acquiring shares now is a smart choice.",
@@ -313,6 +391,95 @@ class GeneralAnalysisApplicationServiceTests {
             "The company's revenue grew 20% last quarter.",
         )
         val validator = FinanceGeneralAnalysisOutputValidator()
+
+        assertThat(
+            validator.isValid(
+                GeneralAnalysisCandidate(
+                    summary = "Acquire skills slowly.",
+                    observations = listOf("The question asks for learning guidance."),
+                    assumptions = listOf("No financial instrument was named."),
+                    nextChecks = listOf("Verify learning resources."),
+                    evidenceNote = "No external source was consulted.",
+                ),
+            ),
+        ).describedAs("Acquire skills slowly").isTrue()
+        assertThat(
+            validator.isValid(
+                GeneralAnalysisCandidate(
+                    summary = "Acquire new skills.",
+                    observations = listOf("The question asks for learning guidance."),
+                    assumptions = listOf("No financial instrument was named."),
+                    nextChecks = listOf("Verify learning resources."),
+                    evidenceNote = "No external source was consulted.",
+                ),
+            ),
+        ).isTrue()
+        assertThat(
+            validator.isValid(
+                GeneralAnalysisCandidate(
+                    summary = "Acquire API design skills.",
+                    observations = listOf("The question asks for learning guidance."),
+                    assumptions = listOf("No financial instrument was named."),
+                    nextChecks = listOf("Verify learning resources."),
+                    evidenceNote = "No external source was consulted.",
+                ),
+            ),
+        ).isTrue()
+        assertThat(
+            validator.isValid(
+                GeneralAnalysisCandidate(
+                    summary = "Acquire more skills.",
+                    observations = listOf("The question asks for learning guidance."),
+                    assumptions = listOf("No financial instrument was named."),
+                    nextChecks = listOf("Verify learning resources."),
+                    evidenceNote = "No external source was consulted.",
+                ),
+            ),
+        ).isTrue()
+        assertThat(
+            validator.isValid(
+                GeneralAnalysisCandidate(
+                    summary = "Acquire skills at work.",
+                    observations = listOf("The question asks for learning guidance."),
+                    assumptions = listOf("No financial instrument was named."),
+                    nextChecks = listOf("Verify learning resources."),
+                    evidenceNote = "No external source was consulted.",
+                ),
+            ),
+        ).isTrue()
+        assertThat(
+            validator.isValid(
+                GeneralAnalysisCandidate(
+                    summary = "Acquire IT skills.",
+                    observations = listOf("The question asks for learning guidance."),
+                    assumptions = listOf("No financial instrument was named."),
+                    nextChecks = listOf("Verify learning resources."),
+                    evidenceNote = "No external source was consulted.",
+                ),
+            ),
+        ).isTrue()
+        assertThat(
+            validator.isValid(
+                GeneralAnalysisCandidate(
+                    summary = "Acquire key skills.",
+                    observations = listOf("The question asks for learning guidance."),
+                    assumptions = listOf("No financial instrument was named."),
+                    nextChecks = listOf("Verify learning resources."),
+                    evidenceNote = "No external source was consulted.",
+                ),
+            ),
+        ).isTrue()
+        assertThat(
+            validator.isValid(
+                GeneralAnalysisCandidate(
+                    summary = "Acquire KEY skills.",
+                    observations = listOf("The question asks for learning guidance."),
+                    assumptions = listOf("No financial instrument was named."),
+                    nextChecks = listOf("Verify learning resources."),
+                    evidenceNote = "No external source was consulted.",
+                ),
+            ),
+        ).isTrue()
 
         candidates.forEach { unsupportedClaim ->
             assertThat(
