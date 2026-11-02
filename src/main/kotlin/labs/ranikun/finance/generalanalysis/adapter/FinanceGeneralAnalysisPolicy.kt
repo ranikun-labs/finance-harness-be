@@ -23,14 +23,14 @@ class FinanceGeneralAnalysisPolicyGuard : GeneralAnalysisPolicyGuard {
                 "should i make an investment|good investment|investment recommendation)\\b|" +
                 "\\b(acquir(?:e|ing|ed|es)|accumulat(?:e|ing|ed|es)|purchas(?:e|ing|ed|es)|" +
                 "buy(?:ing)?|add(?:ing|ed|s)?|load(?:ing)?\\s+up\\s+on)\\b.{0,80}" +
-                "\\b(shares?|stock|equities|securities)\\b.{0,80}" +
+                "\\b(shares?|stock|equity|equities|securities)\\b.{0,80}" +
                 "\\b(wise|prudent|makes sense|sensible|(?:a )?(?:good|smart|wise|sound)\\s+" +
                 "(?:idea|choice|move|decision))\\b|" +
                 "\\b(wise|prudent|makes sense|sensible|(?:a )?(?:good|smart|wise|sound)\\s+" +
                 "(?:idea|choice|move|decision))\\b.{0,80}" +
                 "\\b(acquir(?:e|ing|ed|es)|accumulat(?:e|ing|ed|es)|purchas(?:e|ing|ed|es)|" +
                 "buy(?:ing)?|add(?:ing|ed|s)?|load(?:ing)?\\s+up\\s+on)\\b.{0,80}" +
-                "\\b(shares?|stock|equities|securities)\\b|" +
+                "\\b(shares?|stock|equity|equities|securities)\\b|" +
                 "매수|매도|사도 돼|팔아도 돼|보유해|추천|목표가|얼마까지 오를",
             RegexOption.IGNORE_CASE,
         )
