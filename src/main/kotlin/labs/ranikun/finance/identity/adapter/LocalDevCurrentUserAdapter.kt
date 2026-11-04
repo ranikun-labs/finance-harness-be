@@ -8,7 +8,7 @@ import org.springframework.context.annotation.Profile
 import org.springframework.stereotype.Component
 
 @Component
-@Profile("!production & (local | test)")
+@Profile("!prod & !production & (local | test)")
 @ConditionalOnProperty(
     prefix = "finance.auth",
     name = ["mode"],

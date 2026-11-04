@@ -1,0 +1,21 @@
+{
+  "fixtureVersion": "finance-general-analysis-test-v2",
+  "context": {
+    "scope": {
+      "productReference": "finance",
+      "tenantReference": "tenant:fixture-1",
+      "resourceReferences": ["checklist:fixture-1", "question:fixture-1"]
+    },
+    "principalReference": "principal:fixture-1",
+    "requestReference": "request:fixture-1",
+    "correlationReference": "correlation:fixture-1",
+    "authorityReference": "authority:fixture-1"
+  },
+  "skillId": "finance.general-analysis@1",
+  "businessInput": {
+    "question": "Review synthetic investment notes for omitted checks.",
+    "checkedChecklistItemIds": ["assumptions", "known_facts"],
+    "lensRef": "general-analysis"
+  },
+  "sharedAiQuery": "{\"question\":\"Review synthetic investment notes for omitted checks.\",\"checkedChecklistItemIds\":[\"assumptions\",\"known_facts\"],\"lensRef\":\"general-analysis\"}"
+}
