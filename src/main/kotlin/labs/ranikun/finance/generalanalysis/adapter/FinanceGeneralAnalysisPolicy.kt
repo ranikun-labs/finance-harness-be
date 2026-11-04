@@ -13,8 +13,10 @@ class FinanceGeneralAnalysisPolicyGuard : GeneralAnalysisPolicyGuard {
     override fun classify(question: String): PolicyClassification = when {
         RISK_DECISION_PATTERN.containsMatchIn(question) ||
             DIRECT_EQUITY_ACTION_PATTERN.containsMatchIn(question) ||
-            DIRECT_SHORT_SYMBOL_HOW_TO_PATTERN.containsMatchIn(question) -> PolicyClassification.RISK_DECISION
-        UNKNOWN_INTENT_PATTERN.containsMatchIn(question) -> PolicyClassification.UNKNOWN
+            DIRECT_SHORT_SYMBOL_ACTION_PATTERN.containsMatchIn(question) ||
+            DIRECT_LOWERCASE_SYMBOL_REQUEST_PATTERN.containsMatchIn(question) -> PolicyClassification.RISK_DECISION
+        UNKNOWN_INTENT_PATTERN.containsMatchIn(question) ||
+            AMBIGUOUS_LOWERCASE_SYMBOL_ACTION_PATTERN.containsMatchIn(question) -> PolicyClassification.UNKNOWN
         SAFE_GENERAL_PATTERN.containsMatchIn(question) -> PolicyClassification.SAFE_GENERAL
         else -> PolicyClassification.UNKNOWN
     }
@@ -46,26 +48,55 @@ class FinanceGeneralAnalysisPolicyGuard : GeneralAnalysisPolicyGuard {
                 "invest(?:s|ing|ed)?|trad(?:e|es|ing|ed))\\b",
             setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
         )
-        val DIRECT_SHORT_SYMBOL_HOW_TO_PATTERN = Regex(
-            "(?i:^\\s*how\\s+(?:do|does|did|can|could|would|should)\\s+(?:i|we|you|one)\\b.*" +
-                "\\b(?:acquir(?:e|ing|ed|es)|accumulat(?:e|ing|ed|es)|purchas(?:e|ing|ed|es)|" +
+        val DIRECT_SHORT_SYMBOL_ACTION_PATTERN = Regex(
+            "(?i:\\b(?:acquir(?:e|ing|ed|es)|accumulat(?:e|ing|ed|es)|purchas(?:e|ing|ed|es)|" +
                 "buy(?:ing)?|sell(?:ing|s)?|hold(?:ing|s)?|add(?:ing|ed|s)?|load(?:ing)?\\s+up\\s+on|" +
                 "invest(?:s|ing|ed)?|trad(?:e|es|ing|ed))\\b\\s+)(?:(?i:" +
                 "a|an|the|my|our|your|their|some|any|this|that|new|more|better|basic|useful|valuable|practical|" +
                 "advanced|fractional|existing|available|individual|particular|currently|registered|preferred|" +
                 "common|publicly\\s+traded|low[- ]priced|small[- ]cap|large[- ]cap|penny|in|for|with|from|about|" +
                 "into|on|at|to|by|via|of|off|up|over|under|after|before" +
-                ")\\s+)*(?:(?-i:[A-Z][A-Z0-9.-]{1,5})(?!\\s+(?i:(?:(?:design|technical|basic|advanced|new|practical)\\s+)*(?:skills?|knowledge|learning|experience|training|" +
+                ")\\s+)*+(?-i:[A-Z][A-Z0-9.-]{1,5})(?!\\s+(?i:(?:(?:design|technical|basic|advanced|new|practical)\\s+)*(?:skills?|knowledge|learning|experience|training|" +
                 "course|courses|tutorial|tutorials|documentation|document|query|queries|programming|system|" +
                 "systems|software|service|services|tool|tools|framework|frameworks|concept|concepts|docs|" +
-                "certification|certifications|credentials?)\\b))|(?!(?i:" +
+                "certification|certifications|credentials?|keys?)\\b))\\b.*[?.!]?$",
+            setOf(RegexOption.DOT_MATCHES_ALL),
+        )
+        val DIRECT_LOWERCASE_SYMBOL_REQUEST_PATTERN = Regex(
+            "(?i:^\\s*how\\s+(?:do|does|did|can|could|would|should)\\s+(?:i|we|you|one)\\b).*?\\b(?i:" +
+                "acquir(?:e|ing|ed|es)|accumulat(?:e|ing|ed|es)|purchas(?:e|ing|ed|es)|buy(?:ing)?|" +
+                "sell(?:ing|s)?|hold(?:ing|s)?|add(?:ing|ed|s)?|load(?:ing)?\\s+up\\s+on|" +
+                "invest(?:s|ing|ed)?|trad(?:e|es|ing|ed))\\b\\s+(?:(?i:" +
                 "a|an|the|my|our|your|their|some|any|this|that|new|more|better|basic|useful|valuable|practical|" +
                 "advanced|fractional|existing|available|individual|particular|currently|registered|preferred|" +
-                "common|publicly\\s+traded|low[- ]priced|small[- ]cap|large[- ]cap|penny|key|keys|it|time|data|" +
+                "common|publicly\\s+traded|low[- ]priced|small[- ]cap|large[- ]cap|penny|in|for|with|from|about|" +
+                "into|on|at|to|by|via|of|off|up|over|under|after|before" +
+                ")\\s+)*+(?!(?i:a|an|the|my|our|your|their|some|any|this|that|new|more|better|basic|useful|valuable|" +
+                "practical|advanced|fractional|existing|available|individual|particular|currently|registered|preferred|" +
+                "common|publicly\\s+traded|low[- ]priced|small[- ]cap|large[- ]cap|penny|key|keys|car|cars|it|time|data|" +
                 "food|lunch|dinner|coffee|book|phone|house|team|group|task|goal|plan|item|items|skill|skills|" +
                 "knowledge|learning|experience|context|details|sql|api|pdf|html|json|url|slowly|gradually|" +
-                "carefully|regularly|steadily|weekly|monthly|daily|rapidly|promptly" +
-                ")\\b)[A-Za-z0-9][A-Za-z0-9.-]{1,5})\\b.*[?.!]?$",
+                "carefully|regularly|steadily|weekly|monthly|daily|rapidly|promptly)\\b)[a-z][a-z0-9.-]{1,5}\\b.*[?.!]?$",
+            setOf(RegexOption.DOT_MATCHES_ALL),
+        )
+        val AMBIGUOUS_LOWERCASE_SYMBOL_ACTION_PATTERN = Regex(
+            "(?i:^\\s*(?:how\\s+to|(?:explain|compare|describe|analy[sz]e|summari[sz]e)\\b.*?\\b(?:how|ways?|steps?)\\s+to|" +
+                "(?:explain|compare|describe|analy[sz]e|summari[sz]e)\\b.*?\\bhow\\s+(?:(?:do|does|did|can|could|would|should)\\s+(?:i|we|you|one)|(?:i|we|you|one)\\s+(?:do|does|did|can|could|would|should))|" +
+                "(?:explain|compare|describe|analy[sz]e|summari[sz]e)\\b.*?\\b(?:the\\s+)?process\\s+of|" +
+                "what\\s+(?:is|are|was|were)\\b.*?\\b(?:ways?|steps?)\\s+to)\\b).*?\\b(?i:" +
+                "acquir(?:e|ing|ed|es)|accumulat(?:e|ing|ed|es)|purchas(?:e|ing|ed|es)|buy(?:ing)?|" +
+                "sell(?:ing|s)?|hold(?:ing|s)?|add(?:ing|ed|s)?|load(?:ing)?\\s+up\\s+on|" +
+                "invest(?:s|ing|ed)?|trad(?:e|es|ing|ed))\\b\\s+(?:(?i:" +
+                "a|an|the|my|our|your|their|some|any|this|that|new|more|better|basic|useful|valuable|practical|" +
+                "advanced|fractional|existing|available|individual|particular|currently|registered|preferred|" +
+                "common|publicly\\s+traded|low[- ]priced|small[- ]cap|large[- ]cap|penny|in|for|with|from|about|" +
+                "into|on|at|to|by|via|of|off|up|over|under|after|before" +
+                ")\\s+)*+(?!(?i:a|an|the|my|our|your|their|some|any|this|that|new|more|better|basic|useful|valuable|" +
+                "practical|advanced|fractional|existing|available|individual|particular|currently|registered|preferred|" +
+                "common|publicly\\s+traded|low[- ]priced|small[- ]cap|large[- ]cap|penny|key|keys|car|cars|it|time|data|" +
+                "food|lunch|dinner|coffee|book|phone|house|team|group|task|goal|plan|item|items|skill|skills|" +
+                "knowledge|learning|experience|context|details|sql|api|pdf|html|json|url|slowly|gradually|" +
+                "carefully|regularly|steadily|weekly|monthly|daily|rapidly|promptly)\\b)[a-z][a-z0-9.-]{1,5}\\b.*[?.!]?$",
             setOf(RegexOption.DOT_MATCHES_ALL),
         )
         val UNKNOWN_INTENT_PATTERN = Regex(

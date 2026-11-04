@@ -95,6 +95,14 @@ class GeneralAnalysisApplicationServiceTests {
             "How can we acquire aapl through a broker?",
             "How can we acquire aapl slowly?",
             "How can we acquire aapl over time?",
+            "Explain how to acquire AAPL slowly?",
+            "Compare ways to accumulate TSLA?",
+            "What are ways to invest in MSFT?",
+            "Explain ways to accumulate TSLA?",
+            "Compare how to acquire AAPL?",
+            "What are steps to invest in MSFT?",
+            "Explain how I can acquire AAPL?",
+            "Explain the process of acquiring AAPL.",
             "How can we acquire KEY slowly?",
             "How can we acquire IT slowly?",
             "How can we acquire TEAM slowly?",
@@ -107,6 +115,7 @@ class GeneralAnalysisApplicationServiceTests {
             "How can we acquire fractional aapl over time?",
             "How do I invest in AAPL?",
             "How can I invest in aapl?",
+            "How can I invest in gold?",
             "How do I acquire ${"details and relevant context ".repeat(5)} shares?",
             "How can I purchase AAPL common equity?",
             "Tell me how to accumulate shares through a broker.",
@@ -137,6 +146,11 @@ class GeneralAnalysisApplicationServiceTests {
             "Should I make a move?",
             "Would taking a position in TSLA today be wise?",
             "Explain whether I should take a position in TSLA now?",
+            "Explain how to acquire aapl slowly?",
+            "Compare ways to accumulate tsla?",
+            "What are steps to invest in msft?",
+            "Explain how I can acquire aapl?",
+            "Explain the process of acquiring aapl.",
         ).forEach { ambiguousQuestion ->
             val policyGuard = FinanceGeneralAnalysisPolicyGuard()
             assertThat(policyGuard.classify(ambiguousQuestion))
@@ -159,11 +173,19 @@ class GeneralAnalysisApplicationServiceTests {
     @Test
     fun safeGeneralQuestionAllowlistPreservesInformationalAnalysis() {
         val policyGuard = FinanceGeneralAnalysisPolicyGuard()
-        val questionText = "How can I verify this claim?"
+        val questionText = "Explain how investing in gold works."
         assertThat(policyGuard.classify(questionText)).isEqualTo(PolicyClassification.SAFE_GENERAL)
         listOf(
             "What is stock investment?",
+            "Explain how investing in bonds works.",
+            "Explain how to acquire a new car?",
+            "How can I verify this claim?",
             "How do I invest my time in learning?",
+            "Compare ways to accumulate practical skills.",
+            "What are ways to invest my time in learning?",
+            "What are steps to invest my time in learning?",
+            "Explain how to acquire an API key?",
+            "Explain the process of acquiring API design skills.",
             "How can I acquire knowledge of budgeting?",
             "How can we acquire SQL skills?",
             "How can we acquire skills?",
