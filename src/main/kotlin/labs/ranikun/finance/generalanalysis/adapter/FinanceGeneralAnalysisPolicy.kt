@@ -51,7 +51,7 @@ class FinanceGeneralAnalysisPolicyGuard : GeneralAnalysisPolicyGuard {
         val DIRECT_SHORT_SYMBOL_ACTION_PATTERN = Regex(
             "(?i:\\b(?:acquir(?:e|ing|ed|es)|accumulat(?:e|ing|ed|es)|purchas(?:e|ing|ed|es)|" +
                 "buy(?:ing)?|sell(?:ing|s)?|hold(?:ing|s)?|add(?:ing|ed|s)?|load(?:ing)?\\s+up\\s+on|" +
-                "invest(?:s|ing|ed)?|trad(?:e|es|ing|ed))\\b\\s+)(?:(?i:" +
+                "invest(?:s|ing|ed)?|trad(?:e|es|ing|ed))\\b\\s+)(?:(?!(?-i:[A-Z][A-Z0-9.-]{1,5})\\b)(?i:" +
                 "a|an|the|my|our|your|their|some|any|this|that|new|more|better|basic|useful|valuable|practical|" +
                 "advanced|fractional|existing|available|individual|particular|currently|registered|preferred|" +
                 "common|publicly\\s+traded|low[- ]priced|small[- ]cap|large[- ]cap|penny|in|for|with|from|about|" +
