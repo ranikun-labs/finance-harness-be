@@ -16,6 +16,14 @@ import labs.ranikun.finance.generalanalysis.domain.GeneralAnalysisCandidate
 import labs.ranikun.finance.generalanalysis.domain.GeneralAnalysisStatus
 import labs.ranikun.finance.identity.application.CurrentUserPort
 import labs.ranikun.finance.identity.application.IdentityUserId
+import labs.ranikun.finance.journal.adapter.FinanceJournalReviewOutputValidator
+import labs.ranikun.finance.journal.application.JournalCursor
+import labs.ranikun.finance.journal.application.JournalDetailRecord
+import labs.ranikun.finance.journal.application.JournalListRecord
+import labs.ranikun.finance.journal.application.JournalReadApplicationService
+import labs.ranikun.finance.journal.application.JournalReadStore
+import labs.ranikun.finance.journal.application.JournalReviewApplicationService
+import labs.ranikun.finance.journal.application.JournalReviewOutputValidator
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -26,6 +34,9 @@ import java.net.InetSocketAddress
 import java.net.URI
 import java.nio.charset.StandardCharsets.UTF_8
 import java.time.Duration
+import java.time.Instant
+import java.time.LocalDateTime
+import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -114,6 +125,88 @@ class FinanceSharedAiHttpClientTests {
             val interpretationEvidence = success.evidence.items.last()
             assertThat(interpretationEvidence.kind).isEqualTo("MODEL_INTERPRETATION")
             assertThat(interpretationEvidence.sourceReferences).containsExactly("evidence:fact-1")
+        }
+    }
+
+    @Test
+    fun `synthetic selected Journal review crosses Finance Shared AI HTTP with exact scope and checks`() {
+        val reviewOwner = IdentityUserId("synthetic-owner-http-test")
+        val reviewJournalId = UUID.fromString("51000000-0000-4000-8000-000000000001")
+        val requestBody = AtomicReference<String>()
+        val interpretation = reviewCandidateJson(action = "buy")
+
+        LocalJsonServer { exchange ->
+            val body = exchange.readBody()
+            requestBody.set(body)
+            val requestContext = requestContextFromWire(mapper.readTree(body))
+            exchange.respond(
+                200,
+                successResponse(
+                    requestContext,
+                    interpretation = interpretation,
+                    factSourceReferences = listOf("journal-field:action"),
+                ),
+            )
+        }.use { server ->
+            val currentUserPort = object : CurrentUserPort {
+                override fun currentUserId() = reviewOwner
+            }
+            val journalReadStore = object : JournalReadStore {
+                override fun findDetail(owner: IdentityUserId, journalId: UUID): JournalDetailRecord? =
+                    if (owner == reviewOwner && journalId == reviewJournalId) {
+                        JournalDetailRecord(
+                            journalId = reviewJournalId,
+                            type = "investment",
+                            occurredLocalAt = LocalDateTime.parse("2026-11-04T10:30:00"),
+                            timeZone = "UTC",
+                            createdAt = Instant.parse("2026-11-04T10:31:00Z"),
+                            updatedAt = Instant.parse("2026-11-04T10:31:00Z"),
+                            assetName = "Synthetic asset",
+                            action = "buy",
+                            reasoning = "Synthetic note for contract testing.",
+                            emotion = null,
+                            title = null,
+                            keyContent = null,
+                        )
+                    } else {
+                        null
+                    }
+
+                override fun findStudyOpenQuestions(owner: IdentityUserId, journalId: UUID): List<String> = emptyList()
+
+                override fun findList(owner: IdentityUserId, cursor: JournalCursor?, limitPlusOne: Int): List<JournalListRecord> =
+                    emptyList()
+            }
+            val executionPort = FinanceGeneralAnalysisExecutionAdapter(
+                LocalFinanceExecutionContextFactory("tenant:synthetic-http-test"),
+                FinanceSharedAiHttpClient(server.baseUrl),
+            )
+            val reviewOutputValidator: JournalReviewOutputValidator =
+                FinanceJournalReviewOutputValidator(FinanceGeneralAnalysisOutputValidator())
+            val service = JournalReviewApplicationService(
+                currentUserPort = currentUserPort,
+                journalReadApplicationService = JournalReadApplicationService(currentUserPort, journalReadStore),
+                policyGuard = FinanceGeneralAnalysisPolicyGuard(),
+                executionPort = executionPort,
+                outputValidator = reviewOutputValidator,
+            )
+
+            val result = service.review(reviewJournalId)
+
+            assertThat(result.summary).isEqualTo(recordedFact("action", "buy"))
+            val wireRequest = mapper.readTree(requestBody.get())
+            assertHasExactly(wireRequest, "context", "skillId", "query")
+            assertThat(wireRequest.get("skillId").stringValue()).isEqualTo("finance.general-analysis@1")
+            assertThat(wireRequest.get("query").stringValue()).contains("Finance Selected Journal Review")
+            assertThat(wireRequest.get("query").stringValue()).contains("\"action\":\"buy\"")
+            assertThat(wireRequest.get("query").stringValue())
+                .doesNotContain(reviewJournalId.toString(), reviewOwner.value, "createdAt", "updatedAt")
+            val requestContext = wireRequest.get("context")
+            assertThat(requestContext.get("scope").get("resourceReferences").textValues())
+                .containsExactly("journal:$reviewJournalId")
+            assertThat(requestContext.get("requestReference").stringValue()).isNotBlank()
+            assertThat(requestContext.get("correlationReference").stringValue())
+                .isEqualTo("correlation:${requestContext.get("requestReference").stringValue()}")
         }
     }
 
@@ -422,6 +515,7 @@ class FinanceSharedAiHttpClientTests {
         requestContext: FinanceSharedAiRequestContext,
         executionReference: String = "execution:shared-issued-1",
         interpretation: String = candidateJson(),
+        factSourceReferences: List<String> = listOf("finance:question"),
     ): String {
         val response = mapper.createObjectNode()
         response.put("outcome", "success")
@@ -436,7 +530,15 @@ class FinanceSharedAiHttpClientTests {
         val evidence = response.putObject("evidence")
         evidence.set("context", executionContextJson(requestContext, executionReference))
         val items = evidence.putArray("items")
-        items.add(evidenceItemJson(requestContext, executionReference, "evidence:fact-1", "STRUCTURED_PRODUCT_FACT"))
+        items.add(
+            evidenceItemJson(
+                requestContext,
+                executionReference,
+                "evidence:fact-1",
+                "STRUCTURED_PRODUCT_FACT",
+                factSourceReferences,
+            ),
+        )
         items.add(
             evidenceItemJson(
                 requestContext,
@@ -500,6 +602,27 @@ class FinanceSharedAiHttpClientTests {
             },
         )
 
+    private fun reviewCandidateJson(action: String) =
+        mapper.writeValueAsString(
+            mapper.createObjectNode().apply {
+                put("summary", recordedFact("action", action))
+                putArray("observations").add(userReasoningFact("reasoning", "Synthetic note for contract testing."))
+                putArray("assumptions").add(EXPECTED_REVIEW_ASSUMPTION)
+                putArray("nextChecks").add(EXPECTED_REVIEW_MISSING_EVIDENCE)
+                    .add(EXPECTED_REVIEW_NEXT_QUESTION)
+                put(
+                    "evidenceNote",
+                    "Evidence: Journal fields assetName, action, reasoning, emotion, occurredLocalAt, timeZone; Journal is the only source.",
+                )
+            },
+        )
+
+    private fun recordedFact(field: String, value: Any?): String =
+        "Recorded facts: $field field equals ${mapper.writeValueAsString(value)}."
+
+    private fun userReasoningFact(field: String, value: String): String =
+        "User-provided reasoning: $field field equals ${mapper.writeValueAsString(value)}."
+
     private fun technicalFailureResponse(): String =
         """{"outcome":"technicalFailure","executionReference":"execution:shared-issued-1","category":"MODEL_FAILURE"}"""
 
@@ -559,6 +682,12 @@ class FinanceSharedAiHttpClientTests {
     }
 
     private companion object {
+        const val EXPECTED_REVIEW_ASSUMPTION =
+            "Possible assumptions: The Journal may omit context that could affect how its fields are understood."
+        const val EXPECTED_REVIEW_MISSING_EVIDENCE =
+            "Missing evidence/checks: No separately cited external source is attached to this Journal."
+        const val EXPECTED_REVIEW_NEXT_QUESTION =
+            "Neutral next question: Which Journal field would you like to clarify?"
         const val EXECUTIONS_PATH = "/internal/shared-ai/v1/executions"
         const val MAX_RESPONSE_BYTES = 1_048_576
         const val MAX_EVIDENCE_ITEMS = 128

@@ -141,12 +141,11 @@ class GeneralAnalysisApplicationService(
             executionPort.execute(
                 GeneralAnalysisExecutionInput(
                     owner = owner,
-                    questionId = question.id,
-                    checklistId = checklist.id,
-                    analysisRequestId = analysis.id,
+                    requestId = analysis.id,
                     question = question.text,
                     checkedItemIds = checklist.checkedItemIds,
                     lens = lens,
+                    resourceReferences = setOf("question:${question.id}", "checklist:${checklist.id}"),
                 ),
             )
         } catch (_: Exception) {

@@ -95,6 +95,11 @@ class JournalReadApplicationService(
 
     fun findDetail(journalId: UUID): JournalDetail {
         val owner = currentUserPort.currentUserId()
+        return findDetailForOwner(owner, journalId)
+    }
+
+    /** Internal use-case seam for callers that already resolved the trusted current user once. */
+    internal fun findDetailForOwner(owner: IdentityUserId, journalId: UUID): JournalDetail {
         val record = journalReadStore.findDetail(owner, journalId) ?: throw JournalNotFoundException()
 
         return when (record.type) {

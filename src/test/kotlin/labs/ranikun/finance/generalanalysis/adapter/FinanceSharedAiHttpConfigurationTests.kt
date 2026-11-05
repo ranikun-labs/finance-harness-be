@@ -36,12 +36,13 @@ class FinanceSharedAiHttpConfigurationTests {
             assertThat(context.getBeansOfType(FinanceSharedAiPort::class.java)).hasSize(1)
             val requestContext = context.getBean(FinanceExecutionContextFactory::class.java).create(
                 IdentityUserId("test-principal"),
-                java.util.UUID.fromString("00000000-0000-0000-0000-000000000001"),
-                java.util.UUID.fromString("00000000-0000-0000-0000-000000000002"),
-                java.util.UUID.fromString("00000000-0000-0000-0000-000000000003"),
+                setOf("journal:00000000-0000-0000-0000-000000000001"),
+                "00000000-0000-0000-0000-000000000003",
             )
             assertThat(requestContext.tenantReference).isEqualTo("tenant:explicit-local-test")
             assertThat(requestContext.principalReference).isEqualTo("test-principal")
+            assertThat(requestContext.resourceReferences).containsExactly("journal:00000000-0000-0000-0000-000000000001")
+            assertThat(requestContext.requestReference).isEqualTo("00000000-0000-0000-0000-000000000003")
         }
     }
 

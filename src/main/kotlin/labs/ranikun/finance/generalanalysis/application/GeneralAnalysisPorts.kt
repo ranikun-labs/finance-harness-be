@@ -28,6 +28,7 @@ interface GeneralAnalysisPolicyGuard {
 
 enum class GeneralAnalysisLens {
     GENERAL_ANALYSIS,
+    JOURNAL_REVIEW,
 }
 
 interface GeneralAnalysisLensRouter {
@@ -36,12 +37,13 @@ interface GeneralAnalysisLensRouter {
 
 data class GeneralAnalysisExecutionInput(
     val owner: IdentityUserId,
-    val questionId: UUID,
-    val checklistId: UUID,
-    val analysisRequestId: UUID,
+    val requestId: UUID,
     val question: String,
     val checkedItemIds: Set<String>,
     val lens: GeneralAnalysisLens,
+    val resourceReferences: Set<String>,
+    val requireCorrelation: Boolean = false,
+    val requireUsage: Boolean = false,
 )
 
 sealed interface GeneralAnalysisExecutionResult {
