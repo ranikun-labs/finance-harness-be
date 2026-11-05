@@ -58,6 +58,27 @@ class JournalReviewApplicationServiceTests {
     }
 
     @Test
+    fun `repeated reviews succeed with distinct requests and leave the saved Journal unchanged`() {
+        val savedJournal = studyRecord()
+        val savedSnapshot = savedJournal.copy()
+        val setup = Harness(journalRecord = savedJournal)
+
+        val firstResult = setup.service.review(journalId)
+        val secondResult = setup.service.review(journalId)
+
+        assertThat(firstResult).isEqualTo(reviewCandidate())
+        assertThat(secondResult).isEqualTo(reviewCandidate())
+        assertThat(setup.execution.inputs).hasSize(2)
+        assertThat(setup.execution.inputs.map { it.requestId }.toSet()).hasSize(2)
+        assertThat(setup.journalStore.detailOwners).containsExactly(owner, owner)
+        assertThat(setup.order).containsExactly(
+            "current-user", "journal-detail", "study-questions", "policy", "execution", "output",
+            "current-user", "journal-detail", "study-questions", "policy", "execution", "output",
+        )
+        assertThat(savedJournal).isEqualTo(savedSnapshot)
+    }
+
+    @Test
     fun `missing and foreign journals have identical not found behavior before policy or execution`() {
         val absent = Harness(recordAvailable = false)
         val foreign = Harness(currentOwner = IdentityUserId("synthetic-owner-b"))
