@@ -1,7 +1,7 @@
 # Finance F5 — Shared Identity Consumer 사전 점검 (계약 결정 전)
 
 > 상태: **NON-NORMATIVE PREFLIGHT / NOT APPROVED**. 운영용 인증 어댑터·토큰 정책을 여기서 확정하지 않는다.
-> Jira: [RPL-34](https://ranikunlabs.atlassian.net/browse/RPL-34), [RPL-10](https://ranikunlabs.atlassian.net/browse/RPL-10) (완료), [RPL-11](https://ranikunlabs.atlassian.net/browse/RPL-11) (기존 미완료 조사 재활용), [RPL-55](https://ranikunlabs.atlassian.net/browse/RPL-55) (Carelog G4 선행 영향).
+> Jira: [RPL-34](https://ranikunlabs.atlassian.net/browse/RPL-34), [RPL-10](https://ranikunlabs.atlassian.net/browse/RPL-10) (완료), [RPL-11](https://ranikunlabs.atlassian.net/browse/RPL-11) (중복 참고 전용; 이 이슈에서 재개·새 작업하지 않음), [RPL-55](https://ranikunlabs.atlassian.net/browse/RPL-55) (Carelog G4 선행 영향).
 > 조사 HEAD: `finance-harness-be/main@13d686794cc3409f15bdf9ae02d5aa79a06710f2`, `finance-harness-fe/master@991ec0f3e9fe0979353dc55e4b6d1d9453a56d6f`, `platform-services/main@9f04f44e5dfc88272fcf380f96524f5bfdc92b75`.
 > 참고: Finance 테스트 PR `#10@36bde055...`은 당시 미병합 Draft. 31 PASS·Sol PASS는 이전 세션의 테스트 보고이며 이 문서 작성에서는 재실행하지 않음.
 
