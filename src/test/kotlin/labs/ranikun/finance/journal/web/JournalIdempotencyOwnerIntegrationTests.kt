@@ -16,7 +16,10 @@ import org.springframework.context.annotation.Primary
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.http.MediaType
 
@@ -59,6 +62,77 @@ class JournalIdempotencyOwnerIntegrationTests {
         val secondId = second.response.getHeader("Location")
 
         assertThat(firstId).isNotEqualTo(secondId)
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM journals", Int::class.java))
+            .isEqualTo(2)
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM journal_idempotency_records", Int::class.java))
+            .isEqualTo(2)
+    }
+
+
+    @Test
+    fun switchingCurrentUserAcrossRequestsNeverLeaksJournalOrIdempotencyWinner() {
+        currentUser.current = IdentityUserId("owner-one")
+        val ownerOneCreation = mockMvc.perform(createRequest())
+            .andExpect(status().isCreated)
+            .andExpect(jsonPath("$.journalId").isNotEmpty)
+            .andReturn()
+        val ownerOneLocation = requireNotNull(ownerOneCreation.response.getHeader("Location"))
+        val ownerOneId = ownerOneLocation.substringAfterLast('/')
+
+        currentUser.current = IdentityUserId("owner-two")
+        mockMvc.perform(get("/finance/journals/{journalId}", ownerOneId))
+            .andExpect(status().isNotFound)
+            .andExpect(jsonPath("$.code").value("journal_not_found"))
+        mockMvc.perform(get("/finance/journals"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.items.length()").value(0))
+
+        // The same idempotency key is a different namespace for owner two.
+        val ownerTwoCreation = mockMvc.perform(createRequest())
+            .andExpect(status().isCreated)
+            .andExpect(jsonPath("$.journalId").isNotEmpty)
+            .andReturn()
+        val ownerTwoLocation = requireNotNull(ownerTwoCreation.response.getHeader("Location"))
+        val ownerTwoId = ownerTwoLocation.substringAfterLast('/')
+        assertThat(ownerTwoId).isNotEqualTo(ownerOneId)
+
+        mockMvc.perform(get("/finance/journals"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.items.length()").value(1))
+            .andExpect(jsonPath("$.items[0].journalId").value(ownerTwoId))
+        mockMvc.perform(get("/finance/journals/{journalId}", ownerTwoId))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.journalId").value(ownerTwoId))
+
+        currentUser.current = IdentityUserId("owner-one")
+        mockMvc.perform(get("/finance/journals/{journalId}", ownerTwoId))
+            .andExpect(status().isNotFound)
+            .andExpect(jsonPath("$.code").value("journal_not_found"))
+        mockMvc.perform(get("/finance/journals"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.items.length()").value(1))
+            .andExpect(jsonPath("$.items[0].journalId").value(ownerOneId))
+        mockMvc.perform(get("/finance/journals/{journalId}", ownerOneId))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.journalId").value(ownerOneId))
+
+        val ownerOneReplay = mockMvc.perform(createRequest())
+            .andExpect(status().isCreated)
+            .andExpect(header().string("Location", ownerOneLocation))
+            .andExpect(jsonPath("$.journalId").value(ownerOneId))
+            .andReturn()
+        assertThat(ownerOneReplay.response.contentAsString)
+            .isEqualTo(ownerOneCreation.response.contentAsString)
+
+        currentUser.current = IdentityUserId("owner-two")
+        val ownerTwoReplay = mockMvc.perform(createRequest())
+            .andExpect(status().isCreated)
+            .andExpect(header().string("Location", ownerTwoLocation))
+            .andExpect(jsonPath("$.journalId").value(ownerTwoId))
+            .andReturn()
+        assertThat(ownerTwoReplay.response.contentAsString)
+            .isEqualTo(ownerTwoCreation.response.contentAsString)
+
         assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM journals", Int::class.java))
             .isEqualTo(2)
         assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM journal_idempotency_records", Int::class.java))
