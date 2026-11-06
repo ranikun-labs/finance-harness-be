@@ -29,27 +29,31 @@ class FinanceJournalReviewOutputValidator(
             candidate.observations + candidate.assumptions + candidate.nextChecks
         if (allText.any { it.isBlank() || it.length > MAX_OUTPUT_FIELD_LENGTH }) return false
 
-        val candidateForGeneralPolicy = candidateForGeneralPolicy(candidate, journal)
-        if (!generalAnalysisOutputValidator.isValid(candidateForGeneralPolicy)) return false
+        val candidateWithBoundSourceRedacted = candidateWithBoundSourceRedacted(candidate, journal)
+        if (!generalAnalysisOutputValidator.isValid(candidateWithBoundSourceRedacted)) return false
 
-        return allText.none { UNSAFE_REVIEW_JUDGMENT_PATTERN.containsMatchIn(it) }
+        val generatedText = listOf(
+            candidateWithBoundSourceRedacted.summary,
+            candidateWithBoundSourceRedacted.evidenceNote,
+        ) + candidateWithBoundSourceRedacted.observations + candidateWithBoundSourceRedacted.assumptions +
+            candidateWithBoundSourceRedacted.nextChecks
+        return generatedText.none { UNSAFE_REVIEW_JUDGMENT_PATTERN.containsMatchIn(it) }
     }
 
-    private fun candidateForGeneralPolicy(
+    private fun candidateWithBoundSourceRedacted(
         candidate: GeneralAnalysisCandidate,
         journal: JournalDetail,
     ): GeneralAnalysisCandidate {
         var validatedCandidate = candidate
         if (candidate.summary in recordedFactStatements(journal)) {
-            // The caller first binds this exact statement to one selected Journal field. Only
-            // that verified source text is redacted for the generic generated-content filter.
+            // The exact statement is field-bound above. Redact only that verified source text
+            // when applying generated-content policy checks; length and binding were checked first.
             validatedCandidate = validatedCandidate.copy(summary = VERIFIED_FACT_VALIDATION_PLACEHOLDER)
         }
 
         if (candidate.observations == listOf(expectedUserReasoning(journal))) {
             // The caller first checks that this is the exact JSON-bound, user-labeled Journal
-            // value. Redact only that verified observation for the generic AI-advice filter;
-            // fixed model sections and all other candidate fields remain fully checked.
+            // value. Only that verified source is redacted; generated sections remain checked.
             validatedCandidate = validatedCandidate.copy(
                 observations = listOf(VERIFIED_REASONING_VALIDATION_PLACEHOLDER),
             )

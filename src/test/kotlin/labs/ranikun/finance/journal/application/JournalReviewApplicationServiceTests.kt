@@ -142,6 +142,23 @@ class JournalReviewApplicationServiceTests {
     }
 
     @Test
+    fun `judgment like wording in exact stored reasoning remains labeled source text`() {
+        listOf(
+            "I should have recorded the source before writing this note.",
+            "My risk tolerance note is incomplete.",
+        ).forEach { reasoning ->
+            val setup = Harness(
+                journalRecord = investmentRecord(action = "buy", reasoning = reasoning),
+                candidate = actionRecordedFactCandidate("buy", reasoning),
+            )
+
+            val result = setup.service.review(journalId)
+
+            assertThat(result.observations).containsExactly(userReasoningFact("reasoning", reasoning))
+        }
+    }
+
+    @Test
     fun `fabricated or advisory reasoning text fails exact stored field binding`() {
         val storedReasoning = "I chose to buy after reading the notes"
         val alteredReasoning = actionRecordedFactCandidate("buy", storedReasoning).copy(
@@ -272,6 +289,33 @@ class JournalReviewApplicationServiceTests {
     }
 
     @Test
+    fun `execution failure returns a generic unavailable error without leaking partial output`() {
+        val partialOutput = "provider partial response: You should buy more shares now."
+        val timeout = Harness(executionResult = GeneralAnalysisExecutionResult.TechnicalFailure)
+        val thrown = Harness(executionFailure = IllegalStateException(partialOutput))
+        val invalidCandidate = Harness(candidate = reviewCandidate().copy(summary = partialOutput))
+
+        listOf(
+            timeout to false,
+            thrown to false,
+            invalidCandidate to true,
+        ).forEach { (setup, outputValidationReached) ->
+            val failure = assertThrows(JournalReviewUnavailableException::class.java) {
+                setup.service.review(journalId)
+            }
+
+            assertThat(failure.message).isEqualTo("Journal review could not be completed.")
+            assertThat(failure.cause).isNull()
+            assertThat(failure.toString()).doesNotContain(partialOutput, "buy more shares")
+            val expectedOrder = mutableListOf(
+                "current-user", "journal-detail", "study-questions", "policy", "execution",
+            )
+            if (outputValidationReached) expectedOrder += "output"
+            assertThat(setup.order).containsExactlyElementsOf(expectedOrder)
+        }
+    }
+
+    @Test
     fun `past decision judgment is rejected without returning candidate text`() {
         val unsafe = reviewCandidate().copy(
             assumptions = listOf("Possible assumptions: You made a wise decision."),
@@ -384,11 +428,13 @@ class JournalReviewApplicationServiceTests {
         questionPolicy: GeneralAnalysisPolicyGuard = FinanceGeneralAnalysisPolicyGuard(),
         classificationOverride: PolicyClassification? = null,
         candidate: GeneralAnalysisCandidate = reviewCandidate(),
+        executionResult: GeneralAnalysisExecutionResult = GeneralAnalysisExecutionResult.Success(candidate),
+        executionFailure: Exception? = null,
     ) {
         val order = mutableListOf<String>()
         var guardPrompt: String? = null
         val journalStore = RecordingJournalReadStore(order, recordOwner, recordAvailable, journalRecord)
-        val execution = RecordingExecutionPort(order, candidate)
+        val execution = RecordingExecutionPort(order, executionResult, executionFailure)
         private val currentUserPort = object : CurrentUserPort {
             override fun currentUserId(): IdentityUserId {
                 order += "current-user"
@@ -445,14 +491,16 @@ class JournalReviewApplicationServiceTests {
 
     private class RecordingExecutionPort(
         private val order: MutableList<String>,
-        private val candidate: GeneralAnalysisCandidate,
+        private val result: GeneralAnalysisExecutionResult,
+        private val failure: Exception?,
     ) : GeneralAnalysisExecutionPort {
         val inputs = mutableListOf<GeneralAnalysisExecutionInput>()
 
         override fun execute(input: GeneralAnalysisExecutionInput): GeneralAnalysisExecutionResult {
             order += "execution"
             inputs += input
-            return GeneralAnalysisExecutionResult.Success(candidate)
+            failure?.let { throw it }
+            return result
         }
     }
 
