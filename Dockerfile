@@ -58,10 +58,10 @@ COPY --from=build /workspace/build/libs/*.jar /app/app.jar
 ENV JAVA_TOOL_OPTIONS="-XX:InitialRAMPercentage=25.0 -XX:MaxRAMPercentage=55.0 -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=48m -XX:MaxDirectMemorySize=64m -XX:+ExitOnOutOfMemoryError"
 
 USER app:app
-EXPOSE 8080
+EXPOSE 8080 8081
 STOPSIGNAL SIGTERM
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=40s --retries=6 \
-    CMD wget -Y off -q -O - http://127.0.0.1:8080/actuator/health/readiness | grep -q '"status":"UP"'
+    CMD wget -Y off -q -O - http://127.0.0.1:8081/actuator/health/readiness | grep -q '"status":"UP"'
 
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]
