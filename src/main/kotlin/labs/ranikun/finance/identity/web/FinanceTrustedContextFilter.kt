@@ -152,7 +152,7 @@ class FinanceTrustedContextFilter(
 
     private fun isSupportedRoute(method: String, path: String): Boolean = when {
         path == JOURNAL_PATH -> method == "GET" || method == "POST"
-        LOWERCASE_JOURNAL_ID.matches(path) -> method == "GET"
+        LOWERCASE_JOURNAL_ID.matches(path) -> method == "GET" || method == "PATCH"
         else -> false
     }
 

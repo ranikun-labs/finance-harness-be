@@ -33,6 +33,8 @@ class JournalEntity(
     var createdAt: Instant,
     @Column(name = "updated_at", nullable = false, columnDefinition = "TIMESTAMPTZ")
     var updatedAt: Instant,
+    @Column(name = "revision", nullable = false)
+    var revision: Long = 0,
 )
 
 @Entity

@@ -54,6 +54,14 @@ class JournalApiExceptionHandler {
             ),
         )
 
+    @ExceptionHandler(labs.ranikun.finance.journal.application.InvalidJournalEditException::class)
+    fun handleInvalidEdit(exception: labs.ranikun.finance.journal.application.InvalidJournalEditException): ResponseEntity<JournalErrorResponse> =
+        invalidRequest(listOf(JournalFieldError(exception.field, "invalid")))
+
+    @ExceptionHandler(labs.ranikun.finance.journal.application.JournalRevisionConflictException::class)
+    fun handleRevisionConflict(): ResponseEntity<JournalErrorResponse> =
+        ResponseEntity.status(HttpStatus.CONFLICT).body(JournalErrorResponse("journal_revision_conflict", "Journal changed. Reload before saving again.", requestId(), emptyList()))
+
     @ExceptionHandler(JournalNotFoundException::class)
     fun handleJournalNotFound(): ResponseEntity<JournalErrorResponse> =
         ResponseEntity.status(HttpStatus.NOT_FOUND).body(
