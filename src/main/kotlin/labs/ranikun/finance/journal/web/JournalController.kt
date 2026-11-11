@@ -12,6 +12,7 @@ import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
@@ -39,6 +40,7 @@ data class InvestmentJournalDetailResponse(
     val action: String,
     val reasoning: String,
     val emotion: String?,
+    val revision: Long = 0,
 ) : JournalDetailResponse
 
 data class StudyJournalDetailResponse(
@@ -51,6 +53,7 @@ data class StudyJournalDetailResponse(
     val title: String,
     val keyContent: String,
     val openQuestions: List<String>,
+    val revision: Long = 0,
 ) : JournalDetailResponse
 
 sealed interface JournalListItemResponse
@@ -82,11 +85,24 @@ data class JournalListResponse(
 @RequestMapping("/finance/journals")
 class JournalController(
     private val journalCreateApplicationService: JournalCreateApplicationService,
+    private val journalUpdateService: labs.ranikun.finance.journal.application.JournalUpdateService,
     private val journalReadApplicationService: JournalReadApplicationService,
     private val journalTimeResolver: JournalTimeResolver,
     private val journalCursorCodec: JournalCursorCodec,
     private val idempotencyKeyValidator: IdempotencyKeyValidator,
+    private val lifecycle: labs.ranikun.finance.journal.application.JournalLifecycleService,
 ) {
+
+    @GetMapping("/deleted")
+    fun deletedList(): Map<String, Any> = lifecycle.deletedList()
+
+    @PostMapping("/{journalId}/delete", consumes = [MediaType.APPLICATION_JSON_VALUE])
+    fun delete(@PathVariable journalId: String, @RequestBody request: Map<String, Any?>) =
+        lifecycle.transition(parseJournalId(journalId), request, false)
+
+    @PostMapping("/{journalId}/restore", consumes = [MediaType.APPLICATION_JSON_VALUE])
+    fun restore(@PathVariable journalId: String, @RequestBody request: Map<String, Any?>) =
+        lifecycle.transition(parseJournalId(journalId), request, true)
 
     @GetMapping
     fun list(request: HttpServletRequest): JournalListResponse {
@@ -118,6 +134,13 @@ class JournalController(
         return ResponseEntity
             .created(URI.create("/finance/journals/$journalId"))
             .body(JournalCreateResponse(journalId.toString()))
+    }
+
+    @PatchMapping("/{journalId}", consumes = [MediaType.APPLICATION_JSON_VALUE])
+    fun update(@PathVariable journalId: String, @RequestBody request: Map<String, Any?>): Map<String, Any> {
+        val id = parseJournalId(journalId)
+        val revision = journalUpdateService.update(id, request)
+        return mapOf("journalId" to id.toString(), "revision" to revision)
     }
 
     private fun parseJournalId(rawJournalId: String): UUID {
@@ -158,6 +181,7 @@ class JournalController(
     private fun JournalDetail.toResponse(): JournalDetailResponse = when (this) {
         is JournalDetail.Investment -> InvestmentJournalDetailResponse(
             journalId = journalId.toString(),
+            revision = revision,
             type = "investment",
             occurredAt = occurredLocalAt.toWireString(),
             timeZone = timeZone,
@@ -171,6 +195,7 @@ class JournalController(
 
         is JournalDetail.Study -> StudyJournalDetailResponse(
             journalId = journalId.toString(),
+            revision = revision,
             type = "study",
             occurredAt = occurredLocalAt.toWireString(),
             timeZone = timeZone,
