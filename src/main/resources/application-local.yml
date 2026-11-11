@@ -8,3 +8,7 @@ finance:
     mode: local
     local:
       identity-user-id: ${FINANCE_LOCAL_IDENTITY_USER_ID}
+  shared-ai:
+    enabled: ${FINANCE_LOCAL_SHARED_AI_ENABLED:false}
+    base-url: ${FINANCE_LOCAL_SHARED_AI_BASE_URL:}
+    tenant-reference: ${FINANCE_LOCAL_SHARED_AI_TENANT_REFERENCE:}
