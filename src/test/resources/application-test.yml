@@ -3,6 +3,8 @@ finance:
     mode: local
     local:
       identity-user-id: test-user-rpl-50
+  shared-ai:
+    enabled: false
 
 management:
   server:
