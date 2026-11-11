@@ -114,6 +114,7 @@ internal class FinanceGeneralAnalysisLogicalConsumerFixtureAdapter(
     fun commandFor(input: GeneralAnalysisExecutionInput): LogicalConsumerCommandFixture? {
         val lensRef = when (input.lens) {
             GeneralAnalysisLens.GENERAL_ANALYSIS -> GENERAL_ANALYSIS_LENS_REF
+            GeneralAnalysisLens.JOURNAL_REVIEW -> return null
         }
         val query = canonicalBusinessInputQuery(input, lensRef)
         return LogicalConsumerCommandFixture(

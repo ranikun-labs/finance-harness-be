@@ -11,7 +11,6 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.context.annotation.Profile
 import java.net.URI
-import java.util.UUID
 
 /** Opt-in Finance consumer wiring; it is unavailable on production profiles. */
 @Configuration(proxyBeanMethods = false)
@@ -48,15 +47,14 @@ internal class LocalFinanceExecutionContextFactory(
 
     override fun create(
         owner: IdentityUserId,
-        questionId: UUID,
-        checklistId: UUID,
-        analysisRequestId: UUID,
+        resourceReferences: Set<String>,
+        requestReference: String,
     ) = FinanceSharedAiRequestContext(
         productReference = FINANCE_PRODUCT_REFERENCE,
         tenantReference = trustedTenantReference,
-        resourceReferences = setOf("question:$questionId", "checklist:$checklistId"),
+        resourceReferences = resourceReferences,
         principalReference = owner.value,
-        requestReference = analysisRequestId.toString(),
+        requestReference = requestReference,
         correlationReference = null,
         authorityReference = null,
     )
