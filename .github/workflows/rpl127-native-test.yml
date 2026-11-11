@@ -4,8 +4,10 @@ on:
   push:
     branches:
       - codex/rpl127-ai-general-analysis
+      - codex/rpl138-journal-review-first-slice-20261105
       - recovery/f4-rpl127
       - codex/closeout-rpl127-main-sync
+      - codex/closeout-rpl138-current-main
 
 permissions:
   contents: read

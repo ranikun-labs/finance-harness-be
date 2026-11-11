@@ -2,7 +2,6 @@ package labs.ranikun.finance.generalanalysis.application
 
 import labs.ranikun.finance.identity.application.IdentityUserId
 import java.time.Instant
-import java.util.UUID
 
 /** Finance-owned skill input. Checklist IDs are sorted before formatting the Shared AI query. */
 data class FinanceGeneralAnalysisBusinessInput(
@@ -123,8 +122,7 @@ fun interface FinanceSharedAiPort {
 fun interface FinanceExecutionContextFactory {
     fun create(
         owner: IdentityUserId,
-        questionId: UUID,
-        checklistId: UUID,
-        analysisRequestId: UUID,
+        resourceReferences: Set<String>,
+        requestReference: String,
     ): FinanceSharedAiRequestContext
 }

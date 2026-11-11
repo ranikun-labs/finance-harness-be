@@ -10,6 +10,7 @@ import labs.ranikun.finance.generalanalysis.application.FinanceSharedAiOutcome
 import labs.ranikun.finance.generalanalysis.application.FinanceSharedAiPort
 import labs.ranikun.finance.generalanalysis.application.FinanceSharedAiRequest
 import labs.ranikun.finance.generalanalysis.application.FinanceSharedAiRequestContext
+import labs.ranikun.finance.generalanalysis.application.FinanceSharedAiUsage
 import labs.ranikun.finance.generalanalysis.application.FinanceSharedAiScope
 import labs.ranikun.finance.generalanalysis.application.GeneralAnalysisApplicationService
 import labs.ranikun.finance.generalanalysis.application.GeneralAnalysisExecutionInput
@@ -77,19 +78,90 @@ class FinanceGeneralAnalysisExecutionAdapterTests {
         assertThat(request.context.productReference).isEqualTo("finance")
         assertThat(request.context.tenantReference).isEqualTo(fixture.tenantReference)
         assertThat(request.context.principalReference).isEqualTo(input.owner.value)
-        assertThat(request.context.resourceReferences).containsExactlyInAnyOrder(
-            "question:${input.questionId}",
-            "checklist:${input.checklistId}",
-        )
-        assertThat(request.context.requestReference).isEqualTo(input.analysisRequestId.toString())
+        assertThat(request.context.resourceReferences).isEqualTo(input.resourceReferences)
+        assertThat(request.context.requestReference).isEqualTo(input.requestId.toString())
         assertThat(request.context.correlationReference).isNotBlank()
         assertThat(request.context.authorityReference).isEqualTo("authority:fixture-1")
         assertThat(contextFactory.calls.single()).containsExactly(
             input.owner,
-            input.questionId,
-            input.checklistId,
-            input.analysisRequestId,
+            input.resourceReferences,
+            input.requestId.toString(),
         )
+    }
+
+    @Test
+    fun `journal review sends only the selected journal scope and requires correlated evidence and usage`() {
+        val fixture = fixture()
+        val journalId = UUID.fromString("41000000-0000-4000-8000-000000000091")
+        val input = GeneralAnalysisExecutionInput(
+            owner = IdentityUserId(fixture.principalReference),
+            requestId = UUID.randomUUID(),
+            question = "What facts are present? Journal field values (JSON): {\"title\":\"Synthetic record\"}",
+            checkedItemIds = emptySet(),
+            lens = GeneralAnalysisLens.JOURNAL_REVIEW,
+            resourceReferences = setOf("journal:$journalId"),
+            requireCorrelation = true,
+            requireUsage = true,
+        )
+        val order = mutableListOf<String>()
+        val contextFactory = FixtureContextFactory(fixture.tenantReference, order) { context ->
+            context.copy(correlationReference = null)
+        }
+        val port = RecordingFinanceSharedAiPort(order) { request ->
+            success(request.context).copy(usage = FinanceSharedAiUsage(inputTokens = 5, outputTokens = 4, totalTokens = 9))
+        }
+
+        val result = adapter(contextFactory, port).execute(input)
+
+        assertThat(result).isInstanceOf(GeneralAnalysisExecutionResult.Success::class.java)
+        val request = port.requests.single()
+        assertThat(request.context.resourceReferences).containsExactly("journal:$journalId")
+        assertThat(request.context.requestReference).isEqualTo(input.requestId.toString())
+        assertThat(request.context.correlationReference).isEqualTo("correlation:${input.requestId}")
+        assertThat(request.businessInput.lensRef).isEqualTo("journal-review")
+        assertThat(request.query).contains("Do not infer user traits or evaluate whether a past decision was correct.")
+        assertThat(request.query).contains("Do not recommend or instruct any future trade")
+        assertThat(request.query).contains(input.question)
+        assertThat(request.query).doesNotContain("$journalId")
+        assertThat(order).containsExactly("context", "shared-ai")
+    }
+
+    @Test
+    fun `journal review rejects missing usage and mismatched correlation or evidence`() {
+        val fixture = fixture()
+        val journalId = UUID.fromString("41000000-0000-4000-8000-000000000092")
+        val invalidOutcomes: List<(FinanceSharedAiRequest) -> FinanceSharedAiOutcome> = listOf(
+            { request -> success(request.context) },
+            { request -> success(request.context).copy(usage = FinanceSharedAiUsage(null, null, null)) },
+            { request ->
+                val valid = success(request.context).copy(usage = FinanceSharedAiUsage(2, 1, 3))
+                valid.copy(evidence = valid.evidence.copy(items = emptyList()))
+            },
+            { request ->
+                val valid = success(request.context).copy(usage = FinanceSharedAiUsage(2, 1, 3))
+                valid.copy(evidence = valid.evidence.copy(context = valid.evidence.context.copy(correlationReference = null)))
+            },
+        )
+
+        invalidOutcomes.forEach { outcome ->
+            val order = mutableListOf<String>()
+            val port = RecordingFinanceSharedAiPort(order, outcome)
+            val result = adapter(FixtureContextFactory(fixture.tenantReference, order), port).execute(
+                GeneralAnalysisExecutionInput(
+                    owner = IdentityUserId(fixture.principalReference),
+                    requestId = UUID.randomUUID(),
+                    question = "What facts are present? Journal field values (JSON): {\"title\":\"Synthetic record\"}",
+                    checkedItemIds = emptySet(),
+                    lens = GeneralAnalysisLens.JOURNAL_REVIEW,
+                    resourceReferences = setOf("journal:$journalId"),
+                    requireCorrelation = true,
+                    requireUsage = true,
+                ),
+            )
+
+            assertThat(result).isEqualTo(GeneralAnalysisExecutionResult.TechnicalFailure)
+            assertThat(order).containsExactly("context", "shared-ai")
+        }
     }
 
     @Test
@@ -354,15 +426,18 @@ class FinanceGeneralAnalysisExecutionAdapterTests {
         port: FinanceSharedAiPort,
     ) = FinanceGeneralAnalysisExecutionAdapter(contextFactory, port)
 
-    private fun executionInput(fixture: Fixture) = GeneralAnalysisExecutionInput(
-        owner = IdentityUserId(fixture.principalReference),
-        questionId = UUID.randomUUID(),
-        checklistId = UUID.randomUUID(),
-        analysisRequestId = UUID.randomUUID(),
-        question = fixture.question,
-        checkedItemIds = fixture.checkedItemIds,
-        lens = GeneralAnalysisLens.GENERAL_ANALYSIS,
-    )
+    private fun executionInput(fixture: Fixture): GeneralAnalysisExecutionInput {
+        val questionId = UUID.randomUUID()
+        val checklistId = UUID.randomUUID()
+        return GeneralAnalysisExecutionInput(
+            owner = IdentityUserId(fixture.principalReference),
+            requestId = UUID.randomUUID(),
+            question = fixture.question,
+            checkedItemIds = fixture.checkedItemIds,
+            lens = GeneralAnalysisLens.GENERAL_ANALYSIS,
+            resourceReferences = setOf("question:$questionId", "checklist:$checklistId"),
+        )
+    }
 
     private fun success(
         context: FinanceSharedAiRequestContext,
@@ -455,20 +530,19 @@ class FinanceGeneralAnalysisExecutionAdapterTests {
 
         override fun create(
             owner: IdentityUserId,
-            questionId: UUID,
-            checklistId: UUID,
-            analysisRequestId: UUID,
+            resourceReferences: Set<String>,
+            requestReference: String,
         ): FinanceSharedAiRequestContext {
             order?.add("context")
-            calls += listOf(owner, questionId, checklistId, analysisRequestId)
+            calls += listOf(owner, resourceReferences, requestReference)
             return contextOverride(
                 FinanceSharedAiRequestContext(
                     productReference = "finance",
                     tenantReference = tenantReference,
-                    resourceReferences = setOf("question:$questionId", "checklist:$checklistId"),
+                    resourceReferences = resourceReferences,
                     principalReference = owner.value,
-                    requestReference = analysisRequestId.toString(),
-                    correlationReference = "correlation:$analysisRequestId",
+                    requestReference = requestReference,
+                    correlationReference = "correlation:$requestReference",
                     authorityReference = "authority:fixture-1",
                 ),
             )
