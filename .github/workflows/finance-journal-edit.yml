@@ -13,6 +13,11 @@ on:
       - gradlew
       - src/main/**
       - src/test/kotlin/labs/ranikun/finance/journal/JournalUpdateIntegrationTests.kt
+      - src/test/kotlin/labs/ranikun/finance/journal/JournalLifecycleIntegrationTests.kt
+      - src/test/kotlin/labs/ranikun/finance/journal/JournalSnapshotIntegrationTests.kt
+      - src/test/kotlin/labs/ranikun/finance/journal/persistence/JournalIdempotencyPersistenceIntegrationTests.kt
+      - src/test/kotlin/labs/ranikun/finance/RuntimeFoundationIntegrationTests.kt
+      - src/test/kotlin/labs/ranikun/finance/identity/FinanceTrustedContextConfigurationTests.kt
       - src/test/kotlin/labs/ranikun/finance/TestcontainersConfiguration.kt
       - src/test/resources/**
 
@@ -23,7 +28,8 @@ jobs:
   own-journal-edit:
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'codex/closeout-rpl34-own-edit-main-20261112'
+      (github.event.pull_request.head.ref == 'codex/closeout-rpl34-own-edit-main-20261112' ||
+       github.event.pull_request.head.ref == 'closeout/finance-be18-current-main-20261112')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -47,22 +53,40 @@ jobs:
           java-version: '21'
       - name: Verify Docker runner availability
         run: docker info > /dev/null
-      - name: Run only Journal update integration target
+      - name: Run journal lifecycle and security integration targets
         run: >-
           ./gradlew --no-daemon --console=plain test
           --tests labs.ranikun.finance.journal.JournalUpdateIntegrationTests
+          --tests labs.ranikun.finance.journal.JournalLifecycleIntegrationTests
+          --tests labs.ranikun.finance.journal.JournalSnapshotIntegrationTests
+          --tests labs.ranikun.finance.journal.persistence.JournalIdempotencyPersistenceIntegrationTests
+          --tests labs.ranikun.finance.RuntimeFoundationIntegrationTests
+          --tests labs.ranikun.finance.identity.FinanceTrustedContextConfigurationTests
       - name: Retain bounded test counts in job summary
         if: always()
         shell: bash
         run: |
           python3 - <<'PY'
           import os, pathlib, xml.etree.ElementTree as ET
-          p = pathlib.Path("build/test-results/test/TEST-labs.ranikun.finance.journal.JournalUpdateIntegrationTests.xml")
+          classes = [
+              "labs.ranikun.finance.journal.JournalUpdateIntegrationTests",
+              "labs.ranikun.finance.journal.JournalLifecycleIntegrationTests",
+              "labs.ranikun.finance.journal.JournalSnapshotIntegrationTests",
+              "labs.ranikun.finance.journal.persistence.JournalIdempotencyPersistenceIntegrationTests",
+              "labs.ranikun.finance.RuntimeFoundationIntegrationTests",
+              "labs.ranikun.finance.identity.FinanceTrustedContextConfigurationTests",
+          ]
+          totals = {k: 0 for k in ("tests", "failures", "errors", "skipped")}
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
-              if not p.exists():
-                  summary.write("Journal update JUnit: NOT_AVAILABLE (see failing step).\n")
-              else:
+              for name in classes:
+                  p = pathlib.Path("build/test-results/test/TEST-" + name + ".xml")
+                  if not p.exists():
+                      summary.write(name + ": NOT_AVAILABLE (see failing step)\n")
+                      continue
                   root = ET.parse(p).getroot()
-                  counts = {k: int(root.get(k, 0)) for k in ("tests", "failures", "errors", "skipped")}
-                  summary.write("Journal update counts: " + str(counts) + "\n")
+                  counts = {k: int(root.get(k, 0)) for k in totals}
+                  for key, value in counts.items():
+                      totals[key] += value
+                  summary.write(name + ": " + str(counts) + "\n")
+              summary.write("Targeted total: " + str(totals) + "\n")
           PY

@@ -18,7 +18,7 @@ class JournalUpdateService(private val currentUserPort: CurrentUserPort, private
     @Transactional
     fun update(id: UUID, request: Map<String, Any?>): Long {
         val owner = currentUserPort.currentUserId().value
-        val row = jdbc.query("SELECT type, revision FROM journals WHERE id = ? AND identity_user_id = ? FOR UPDATE",
+        val row = jdbc.query("SELECT type, revision FROM journals WHERE id = ? AND identity_user_id = ? AND deleted_at IS NULL FOR UPDATE",
             { rs, _ -> rs.getString("type") to rs.getLong("revision") }, id, owner).singleOrNull()
             ?: throw JournalNotFoundException()
         if (request.keys != setOf("expectedRevision", "fields")) invalid("request")
