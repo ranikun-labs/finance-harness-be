@@ -84,6 +84,8 @@ class FinanceTrustedContextConfigurationTests {
         val cases = listOf(
             listOf("spring.profiles.active=finance-trusted-context-reference", "PLATFORM_ENVIRONMENT= Production "),
             listOf("spring.profiles.active=finance-trusted-context-reference", "platform.metrics.environment=PRoD"),
+            listOf("spring.profiles.active=finance-trusted-context-reference", "FINANCE_METRICS_ENVIRONMENT=production"),
+            listOf("spring.profiles.active=finance-trusted-context-reference", "management.metrics.tags.environment=production"),
             listOf(
                 "spring.profiles.active=finance-trusted-context-reference,production",
                 "PLATFORM_ENVIRONMENT=local",

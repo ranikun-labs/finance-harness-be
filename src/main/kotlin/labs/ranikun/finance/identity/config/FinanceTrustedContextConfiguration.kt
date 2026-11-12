@@ -40,7 +40,9 @@ class FinanceTrustedContextConfiguration : EnvironmentAware {
         }
         check(
             !isProductionMarker(environment.getProperty("PLATFORM_ENVIRONMENT")) &&
-                !isProductionMarker(environment.getProperty("platform.metrics.environment")),
+                !isProductionMarker(environment.getProperty("platform.metrics.environment")) &&
+                !isProductionMarker(environment.getProperty("FINANCE_METRICS_ENVIRONMENT")) &&
+                !isProductionMarker(environment.getProperty("management.metrics.tags.environment")),
         ) {
             "The trusted Finance context reference profile cannot be combined with a production environment marker"
         }
