@@ -70,14 +70,14 @@ class JournalReadQueryCountIntegrationTests {
     }
 
     @Test
-    fun studyDetailUsesOneProjectionAndOneQuestionQuery() {
+    fun studyDetailUsesOneSnapshotQuery() {
         val journalId = createStudy()
         clearInvocations(jdbcTemplate)
 
         mockMvc.perform(get("/finance/journals/{journalId}", journalId))
             .andExpect(status().isOk)
 
-        assertThat(jdbcQueryInvocationCount()).isEqualTo(2)
+        assertThat(jdbcQueryInvocationCount()).isEqualTo(1)
     }
 
     @Test
