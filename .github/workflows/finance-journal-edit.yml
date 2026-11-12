@@ -23,7 +23,7 @@ jobs:
   own-journal-edit:
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'codex/closeout-rpl34-own-edit-main-20261112'
+      github.event.pull_request.head.ref == 'rpl34-lifecycle-main-preserve-20261112'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

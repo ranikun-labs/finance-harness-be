@@ -4,7 +4,7 @@ This document records the non-production Finance receiver reference for RPL-34. 
 
 ## Wire reference
 
-The fixture applies only to `GET /finance/journals`, `POST /finance/journals`, `GET /finance/journals/{lowercase-canonical-UUID}`, and `PATCH /finance/journals/{lowercase-canonical-UUID}`. The canonical detail PATCH is limited to own raw Journal correction under `docs/contracts/journal-edit-v1.md`; it remains part of this non-production reference. The producer emits exactly one value for each header:
+The fixture applies only to `GET /finance/journals`, `POST /finance/journals`, `GET /finance/journals/{lowercase-canonical-UUID}`, and `PATCH /finance/journals/{lowercase-canonical-UUID}`. The canonical detail PATCH is limited to own raw Journal correction under `docs/contracts/journal-edit-v1.md`; it remains part of this non-production reference. The separately approved lifecycle extension under `journal-lifecycle-v1.md` additionally permits `GET /finance/journals/deleted` and `POST /finance/journals/{lowercase-canonical-UUID}/delete` or `/restore`, with unchanged trusted-caller/principal validation. The producer emits exactly one value for each header:
 
 | Header | Reference value |
 | --- | --- |
