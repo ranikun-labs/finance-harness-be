@@ -1,0 +1,68 @@
+name: Finance own-journal edit BE (proposed)
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches:
+      - main
+    paths:
+      - .github/workflows/finance-journal-edit.yml
+      - build.gradle.kts
+      - settings.gradle.kts
+      - gradle.properties
+      - gradle/**
+      - gradlew
+      - src/main/**
+      - src/test/kotlin/labs/ranikun/finance/journal/JournalUpdateIntegrationTests.kt
+      - src/test/kotlin/labs/ranikun/finance/TestcontainersConfiguration.kt
+      - src/test/resources/**
+
+permissions:
+  contents: read
+
+jobs:
+  own-journal-edit:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'codex/closeout-rpl34-own-edit-main-20261112'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact event head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Bind verification to exact source
+        env:
+          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EVENT_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$EVENT_HEAD_SHA"
+          printf 'Verified source HEAD: %s\n' "$EVENT_HEAD_SHA"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Verify Docker runner availability
+        run: docker info > /dev/null
+      - name: Run only Journal update integration target
+        run: >-
+          ./gradlew --no-daemon --console=plain test
+          --tests labs.ranikun.finance.journal.JournalUpdateIntegrationTests
+      - name: Retain bounded test counts in job summary
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, xml.etree.ElementTree as ET
+          p = pathlib.Path("build/test-results/test/TEST-labs.ranikun.finance.journal.JournalUpdateIntegrationTests.xml")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              if not p.exists():
+                  summary.write("Journal update JUnit: NOT_AVAILABLE (see failing step).\n")
+              else:
+                  root = ET.parse(p).getroot()
+                  counts = {k: int(root.get(k, 0)) for k in ("tests", "failures", "errors", "skipped")}
+                  summary.write("Journal update counts: " + str(counts) + "\n")
+          PY

@@ -59,6 +59,7 @@ class JdbcJournalReadStore(
                    j.occurred_time_zone,
                    j.created_at,
                    j.updated_at,
+                   j.revision,
                    i.asset_name,
                    i.action,
                    i.reasoning,
@@ -125,6 +126,7 @@ class JdbcJournalReadStore(
         val DETAIL_ROW_MAPPER = RowMapper { resultSet: ResultSet, _: Int ->
             JournalDetailRecord(
                 journalId = resultSet.getObject("journal_id", UUID::class.java),
+                revision = resultSet.getLong("revision"),
                 type = resultSet.getString("type"),
                 occurredLocalAt = resultSet.getObject("occurred_local_at", LocalDateTime::class.java),
                 timeZone = resultSet.getString("occurred_time_zone"),
