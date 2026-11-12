@@ -151,6 +151,9 @@ class FinanceTrustedContextFilter(
     }
 
     private fun isSupportedRoute(method: String, path: String): Boolean = when {
+        path == "$JOURNAL_PATH/deleted" -> method == "GET"
+        (path.endsWith("/delete") || path.endsWith("/restore")) &&
+            LOWERCASE_JOURNAL_ID.matches(path.substringBeforeLast('/')) -> method == "POST"
         path == JOURNAL_PATH -> method == "GET" || method == "POST"
         LOWERCASE_JOURNAL_ID.matches(path) -> method == "GET" || method == "PATCH"
         else -> false

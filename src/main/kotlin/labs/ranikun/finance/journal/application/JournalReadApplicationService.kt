@@ -30,6 +30,7 @@ data class JournalDetailRecord(
     val title: String?,
     val keyContent: String?,
     val revision: Long = 0,
+    val openQuestions: List<String> = emptyList(),
 )
 
 data class JournalCursor(
@@ -124,7 +125,7 @@ class JournalReadApplicationService(
                 updatedAt = record.updatedAt,
                 title = requireNotNull(record.title),
                 keyContent = requireNotNull(record.keyContent),
-                openQuestions = journalReadStore.findStudyOpenQuestions(owner, journalId),
+                openQuestions = record.openQuestions,
             )
 
             else -> error("Unknown persisted Journal type: ${record.type}")
