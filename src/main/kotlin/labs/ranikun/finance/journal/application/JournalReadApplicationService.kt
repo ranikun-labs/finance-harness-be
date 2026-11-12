@@ -29,6 +29,7 @@ data class JournalDetailRecord(
     val emotion: String?,
     val title: String?,
     val keyContent: String?,
+    val revision: Long = 0,
 )
 
 data class JournalCursor(
@@ -60,6 +61,7 @@ sealed interface JournalDetail {
     val timeZone: String
     val createdAt: Instant
     val updatedAt: Instant
+    val revision: Long
 
     data class Investment(
         override val journalId: UUID,
@@ -71,6 +73,7 @@ sealed interface JournalDetail {
         val action: String,
         val reasoning: String,
         val emotion: String?,
+        override val revision: Long = 0,
     ) : JournalDetail
 
     data class Study(
@@ -82,6 +85,7 @@ sealed interface JournalDetail {
         val title: String,
         val keyContent: String,
         val openQuestions: List<String>,
+        override val revision: Long = 0,
     ) : JournalDetail
 }
 
@@ -100,6 +104,7 @@ class JournalReadApplicationService(
         return when (record.type) {
             "investment" -> JournalDetail.Investment(
                 journalId = record.journalId,
+                revision = record.revision,
                 occurredLocalAt = record.occurredLocalAt,
                 timeZone = record.timeZone,
                 createdAt = record.createdAt,
@@ -112,6 +117,7 @@ class JournalReadApplicationService(
 
             "study" -> JournalDetail.Study(
                 journalId = record.journalId,
+                revision = record.revision,
                 occurredLocalAt = record.occurredLocalAt,
                 timeZone = record.timeZone,
                 createdAt = record.createdAt,
