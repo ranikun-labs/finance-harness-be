@@ -3,6 +3,7 @@ set -euo pipefail
 
 finance_source="${1:?Finance source checkout is required}"
 platform_source="${2:?Platform source checkout is required}"
+finance_fe_source="${3:?Finance FE source checkout is required}"
 : "${RUNNER_TEMP:?Hosted runner temp directory is required}"
 : "${JAVA_HOME_17_X64:?Java 17 is required for Gateway}"
 : "${JAVA_HOME_21_X64:?Java 21 is required for Core and Finance}"
@@ -15,6 +16,8 @@ expected_finance_sha=5cab16ab7ba04d0bf65b77b1ebca976d6d29e1dc
 expected_finance_tree=d598dadb2677b2ac73488b6ab34f6e278aab009c
 expected_platform_sha=5a0b0dc38f1d53655cc21613f9b202a317d7c37d
 expected_platform_tree=9057914850b9e0026fa8851cbb062c692a51b4b3
+expected_finance_fe_sha=db97f7f370276c036c8f3eea57c1b6a73bb12006
+expected_finance_fe_tree=ef476d89cbdc9dd10e6f71a069b8cbf9e9fff2d3
 fixture_account_id=00000000-0000-4000-8000-000000000024
 core_port=18081
 core_management_port=19092
@@ -36,6 +39,7 @@ check_source() {
 }
 check_source "$finance_source" "$expected_finance_sha" "$expected_finance_tree"
 check_source "$platform_source" "$expected_platform_sha" "$expected_platform_tree"
+check_source "$finance_fe_source" "$expected_finance_fe_sha" "$expected_finance_fe_tree"
 
 # The hosted service container uses trust auth and is destroyed with this single job.
 export PGHOST=127.0.0.1 PGPORT=5432 PGUSER=postgres PGDATABASE=postgres
@@ -186,3 +190,79 @@ wait_ready "http://127.0.0.1:$gateway_management_port/actuator/health/readiness"
 E2E_GATEWAY_URL="http://127.0.0.1:$gateway_port" \
 E2E_EXPECTED_SUBJECT="$fixture_account_id" \
 node "$PWD/scripts/e2e/finance-investment-composite-api-e2e.mjs"
+
+# Add a test-only Playwright overlay after verifying the immutable FE source pin. A job-local
+# Vite config merges the pinned /finance proxy with a second local Gateway proxy for reference login.
+ui_test="$PWD/scripts/e2e/finance-investment-lifecycle-ui.integration.spec.ts"
+ui_harness_tsx="$PWD/scripts/e2e/finance-investment-lifecycle-harness.tsx"
+ui_harness_html="$PWD/scripts/e2e/finance-investment-lifecycle-harness.html"
+ui_vite_config="$PWD/scripts/e2e/finance-investment-lifecycle-vite.config.ts"
+ui_playwright_config="$PWD/scripts/e2e/finance-investment-lifecycle-playwright.config.ts"
+ui_server="$PWD/scripts/e2e/finance-investment-lifecycle-server.mjs"
+install -m 0644 "$ui_test" "$finance_fe_source/e2e/journal-lifecycle.integration.spec.ts"
+install -m 0644 "$ui_harness_tsx" "$finance_fe_source/e2e/support/financeInvestmentLifecycleHarness.tsx"
+install -m 0644 "$ui_harness_html" "$finance_fe_source/e2e/support/finance-investment-lifecycle-harness.html"
+install -m 0644 "$ui_vite_config" "$finance_fe_source/vite.finance-investment-lifecycle.config.ts"
+install -m 0644 "$ui_playwright_config" "$finance_fe_source/playwright.finance-investment-lifecycle.config.ts"
+install -m 0644 "$ui_server" "$finance_fe_source/e2e/support/financeInvestmentLifecycleServer.mjs"
+browser_log="$log_dir/finance-investment-lifecycle-playwright.log"
+browser_stage_file="$log_dir/finance-investment-lifecycle-stage"
+rm -f "$browser_stage_file"
+if ! (
+  cd "$finance_fe_source"
+  FINANCE_API_PROXY_TARGET="http://127.0.0.1:$gateway_port" \
+  VITE_FINANCE_REFERENCE_AUTH_ENABLED=true \
+  E2E_PRIVATE_STAGE_FILE="$browser_stage_file" \
+  pnpm exec playwright test \
+    --config=playwright.finance-investment-lifecycle.config.ts \
+    --reporter=line \
+    --trace=off \
+    --output="$log_dir/finance-investment-lifecycle-playwright-output"
+) >"$browser_log" 2>&1; then
+  browser_stage=unavailable
+  if [[ -f "$browser_stage_file" ]]; then
+    browser_stage="$(<"$browser_stage_file")"
+  fi
+  case "$browser_stage" in
+    failed:auth-login|failed:investment-create|failed:investment-edit|failed:investment-delete|failed:deleted-list|failed:investment-restore|failed:restored-detail)
+      printf 'Finance FE browser lifecycle failed at stage=%s; private runner logs were not published.\n' "${browser_stage#failed:}" >&2
+      ;;
+    *)
+      printf 'Finance FE browser lifecycle runner failed before a controlled stage was recorded; private runner logs were not published.\n' >&2
+      ;;
+  esac
+  exit 1
+fi
+
+fe_counts="$(psql -v ON_ERROR_STOP=1 -d finance_db -At -F ',' -c "
+  SELECT
+    (SELECT count(*) FROM journals),
+    (SELECT count(*) FROM journals WHERE identity_user_id = '${fixture_account_id}'),
+    (SELECT count(*) FROM journals WHERE identity_user_id <> '${fixture_account_id}'),
+    (SELECT count(*) FROM journals WHERE revision = 3 AND deleted_at IS NULL),
+    (SELECT count(*) FROM investment_journals),
+    (SELECT count(*) FROM journal_idempotency_records),
+    (SELECT count(*) FROM journals j
+      JOIN investment_journals i ON i.journal_id = j.id
+      WHERE j.identity_user_id = '${fixture_account_id}'
+        AND j.type = 'investment'
+        AND j.revision = 3
+        AND j.deleted_at IS NULL
+        AND i.asset_name = 'Hosted UI investment revised'
+        AND i.action = 'watching'
+        AND i.reasoning = 'Synthetic UI integration flow; edited through the browser.'
+        AND i.emotion = '관망')
+" 2>"$log_dir/finance-investment-lifecycle-db-check.stderr")" || {
+  printf 'Finance FE browser lifecycle database verification failed; private runner logs were not published.\n' >&2
+  exit 1
+}
+[[ "$fe_counts" == "2,2,0,2,2,2,1" ]] || {
+  printf 'Finance FE browser lifecycle database verification failed; only controlled counts were evaluated.\n' >&2
+  exit 1
+}
+
+ui_summary='Finance FE browser lifecycle: PASS\nflow=synthetic reference login -> Investment create/edit/delete/deleted-list/restore through the pinned AppRouter and same Gateway\nstatuses=login:200,create:201,edit:200,delete:200,deleted_list:200,restore:200\nrevision=0->1->2->3; restored record is active and absent from the deleted list\nsource=Finance FE db97f7f370276c036c8f3eea57c1b6a73bb12006 tree ef476d89cbdc9dd10e6f71a069b8cbf9e9fff2d3\npersisted_counts=owned_journals:2,foreign_owner:0,active_revision_3:2,investment_rows:2,idempotency_rows:2,edited_UI_record:1'
+printf '%b\n' "$ui_summary"
+if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+  printf '%b\n' "$ui_summary" >> "$GITHUB_STEP_SUMMARY"
+fi
