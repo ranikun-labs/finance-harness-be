@@ -1,0 +1,135 @@
+name: "Finance BE #21 exact Study replay"
+
+on:
+  push:
+    branches:
+      - codex/rpl34-be21-study-replay-ci-20261118
+    paths:
+      - .github/workflows/finance-be21-study-replay.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: finance-be21-study-replay-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  exact-study-replay:
+    if: github.repository == 'ranikun-labs/finance-harness-be' && github.ref == 'refs/heads/codex/rpl34-be21-study-replay-ci-20261118'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out workflow source SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: workflow-source
+          persist-credentials: false
+
+      - name: Check out fixed test target SHA
+        uses: actions/checkout@v4
+        with:
+          repository: ranikun-labs/finance-harness-be
+          ref: 81062d6835f33e3214442cdb4f92037cb6d70c89
+          path: target-source
+          persist-credentials: false
+
+      - name: Bind workflow and test source SHAs separately
+        env:
+          WORKFLOW_SOURCE_SHA: ${{ github.sha }}
+          TARGET_SOURCE_SHA: 81062d6835f33e3214442cdb4f92037cb6d70c89
+          WORKFLOW_REF: ${{ github.ref }}
+          TEST_FILTER: labs.ranikun.finance.journal.web.JournalIdempotencyApiIntegrationTests.sameStudyKeyReplaysTheOriginalJournal
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$WORKFLOW_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$TARGET_SOURCE_SHA" == "81062d6835f33e3214442cdb4f92037cb6d70c89" ]]
+          test "$(git -C workflow-source rev-parse HEAD)" = "$WORKFLOW_SOURCE_SHA"
+          test "$(git -C target-source rev-parse HEAD)" = "$TARGET_SOURCE_SHA"
+          mkdir -p ci-evidence
+          {
+            printf 'workflow_ref=%s\n' "$WORKFLOW_REF"
+            printf 'workflow_source_sha=%s\n' "$WORKFLOW_SOURCE_SHA"
+            printf 'test_target_sha=%s\n' "$TARGET_SOURCE_SHA"
+            printf 'test_filter=%s\n' "$TEST_FILTER"
+          } | tee ci-evidence/source-binding.txt
+          {
+            printf 'Workflow source SHA: `%s`\n\n' "$WORKFLOW_SOURCE_SHA"
+            printf 'Test target SHA: `%s`\n\n' "$TARGET_SOURCE_SHA"
+            printf 'Test filter: `%s`\n' "$TEST_FILTER"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Verify disposable hosted Docker runner
+        run: docker info > /dev/null
+
+      - name: Run only the exact Study replay test
+        working-directory: target-source
+        run: >-
+          ./gradlew --no-daemon --console=plain test
+          --tests 'labs.ranikun.finance.journal.web.JournalIdempotencyApiIntegrationTests.sameStudyKeyReplaysTheOriginalJournal'
+
+      - name: Summarize exact test XML
+        if: always()
+        env:
+          WORKFLOW_SOURCE_SHA: ${{ github.sha }}
+          TARGET_SOURCE_SHA: 81062d6835f33e3214442cdb4f92037cb6d70c89
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import xml.etree.ElementTree as ET
+
+          xml_path = pathlib.Path(
+              "target-source/build/test-results/test/"
+              "TEST-labs.ranikun.finance.journal.web.JournalIdempotencyApiIntegrationTests.xml"
+          )
+          summary_path = pathlib.Path(os.environ["GITHUB_STEP_SUMMARY"])
+          evidence_path = pathlib.Path("ci-evidence/test-result-summary.txt")
+          evidence_path.parent.mkdir(parents=True, exist_ok=True)
+          with summary_path.open("a", encoding="utf-8") as summary, evidence_path.open("w", encoding="utf-8") as evidence:
+              evidence.write(f"workflow_source_sha={os.environ['WORKFLOW_SOURCE_SHA']}\n")
+              evidence.write(f"test_target_sha={os.environ['TARGET_SOURCE_SHA']}\n")
+              if not xml_path.exists():
+                  line = "JUnit XML: NOT_AVAILABLE (see test or runner step result)."
+                  summary.write(line + "\n")
+                  evidence.write(line + "\n")
+                  raise SystemExit("JUnit XML was not produced for the requested test.")
+              else:
+                  root = ET.parse(xml_path).getroot()
+                  cases = root.findall(".//testcase")
+                  counts = {key: int(root.get(key, 0)) for key in ("tests", "failures", "errors", "skipped")}
+                  expected = "sameStudyKeyReplaysTheOriginalJournal()"
+                  observed = [case.get("name", "") for case in cases]
+                  result = f"JUnit counts: {counts}; cases: {observed}"
+                  summary.write(result + "\n")
+                  evidence.write(result + "\n")
+                  if (
+                      counts["tests"] != 1
+                      or counts["failures"] != 0
+                      or counts["errors"] != 0
+                      or counts["skipped"] != 0
+                      or len(cases) != 1
+                      or expected not in observed
+                  ):
+                      raise SystemExit("Expected one passing, non-skipped Study replay test in JUnit XML.")
+          PY
+
+      - name: Retain source binding and JUnit XML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: finance-be21-study-replay-evidence
+          path: |
+            ci-evidence/
+            target-source/build/test-results/test/TEST-labs.ranikun.finance.journal.web.JournalIdempotencyApiIntegrationTests.xml
+          if-no-files-found: warn
+          retention-days: 30
