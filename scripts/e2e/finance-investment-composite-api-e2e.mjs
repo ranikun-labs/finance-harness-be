@@ -5,6 +5,14 @@ import { appendFile } from 'node:fs/promises';
 
 let stage = 'initialization';
 
+function expectStatus(response, expected, label) {
+  if (response.status !== expected) {
+    stage = `${label} HTTP ${response.status}`;
+    assert.equal(response.status, expected);
+  }
+  stage = label;
+}
+
 async function main() {
   const base = process.env.E2E_GATEWAY_URL;
   const expectedSubject = process.env.E2E_EXPECTED_SUBJECT;
@@ -26,7 +34,7 @@ async function main() {
     headers: { 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify({ userId, password }),
   });
-  assert.equal(loginResponse.status, 200);
+  expectStatus(loginResponse, 200, 'Core reference login through Gateway');
   assert.match(loginResponse.headers.get('cache-control') ?? '', /no-store/i);
   assert.match(loginResponse.headers.get('pragma') ?? '', /no-cache/i);
   assert.equal(loginResponse.headers.get('set-cookie'), null);
@@ -44,6 +52,7 @@ async function main() {
   const claims = JSON.parse(Buffer.from(tokenParts[1], 'base64url').toString('utf8'));
   assert.equal(claims.sub, expectedSubject);
   assert.equal(claims.iss, 'urn:ranikunlabs:identity:finance:reference');
+  assert.equal(claims.token_use, 'access');
   assert.ok(
     claims.aud === 'finance-journal-reference' ||
       (Array.isArray(claims.aud) && claims.aud.includes('finance-journal-reference')),
@@ -67,10 +76,9 @@ async function main() {
       timeZone: 'Asia/Seoul',
       action: 'interest',
       reasoning: 'Synthetic integration flow; no product or customer data.',
-      emotion: null,
     }),
   });
-  assert.equal(createResponse.status, 201);
+  expectStatus(createResponse, 201, 'Finance investment create through Gateway');
   const created = await createResponse.json();
   assert.match(created.journalId ?? '', /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
   const journalId = created.journalId;
@@ -79,7 +87,7 @@ async function main() {
   const readHeaders = { authorization: `Bearer ${tokenRecord.accessToken}`, ...spoofedContext };
   stage = 'Finance investment detail read through Gateway';
   const detailResponse = await fetch(`${base}/finance/journals/${journalId}`, { headers: readHeaders });
-  assert.equal(detailResponse.status, 200);
+  expectStatus(detailResponse, 200, 'Finance investment detail read through Gateway');
   const detail = await detailResponse.json();
   assert.equal(detail.journalId, journalId);
   assert.equal(detail.type, 'investment');
@@ -91,7 +99,7 @@ async function main() {
 
   stage = 'Finance investment list read through Gateway';
   const listResponse = await fetch(`${base}/finance/journals?limit=20`, { headers: readHeaders });
-  assert.equal(listResponse.status, 200);
+  expectStatus(listResponse, 200, 'Finance investment list read through Gateway');
   const list = await listResponse.json();
   assert.ok(Array.isArray(list.items) && list.items.some((item) => item.journalId === journalId));
 
