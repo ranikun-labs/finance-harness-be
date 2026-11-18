@@ -42,7 +42,7 @@ class JournalIdempotencyPersistenceIntegrationTests {
         assertThat(jdbcTemplate.queryForObject("SELECT current_setting('server_version')", String::class.java))
             .startsWith("18.4")
         assertThat(flyway.info().applied().mapNotNull { it.version?.version })
-            .containsExactly("1", "2", "3")
+            .containsExactly("1", "2", "3", "4")
 
         assertThat(jdbcTemplate.queryForList(
             """

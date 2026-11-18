@@ -36,7 +36,7 @@ class RuntimeFoundationIntegrationTests {
     @Test
     fun applicationContextStartsAgainstPostgreSQLAndAppliesJournalMigration() {
         assertThat(flyway.info().applied().mapNotNull { it.version?.version })
-            .containsExactly("1", "2", "3")
+            .containsExactly("1", "2", "3", "4")
         assertThat(dataSource.connection.use { connection ->
             connection.metaData.getTables(null, null, "journals", null).use { tables -> tables.next() }
         }).isTrue()

@@ -19,6 +19,7 @@ class JournalCreateTransactionalAttempt(
     private val journalStore: JournalStore,
     private val idempotencyStore: JournalIdempotencyStore,
     private val clock: Clock,
+    private val lifecycle: JournalLifecycleService,
 ) {
 
     @Transactional
@@ -31,6 +32,7 @@ class JournalCreateTransactionalAttempt(
         val existing = idempotencyStore.find(owner, JOURNAL_CREATE_OPERATION, idempotencyKey)
         if (existing != null) {
             if (existing.requestFingerprint == requestFingerprint) {
+                lifecycle.requireActiveForReplay(owner, existing.journalId)
                 return existing.journalId
             }
             throw IdempotencyKeyReusedException()

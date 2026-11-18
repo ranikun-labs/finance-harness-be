@@ -65,11 +65,13 @@ class JdbcJournalReadStore(
                    i.reasoning,
                    i.emotion,
                    s.title,
-                   s.key_content
+                   s.key_content,
+                   ARRAY(SELECT q.question FROM study_open_questions q
+                         WHERE q.study_journal_id = j.id ORDER BY q.position ASC) AS open_questions
             FROM journals j
             LEFT JOIN investment_journals i ON i.journal_id = j.id
             LEFT JOIN study_journals s ON s.journal_id = j.id
-            WHERE j.identity_user_id = ?
+            WHERE j.deleted_at IS NULL AND j.identity_user_id = ?
               AND j.id = ?
             """
 
@@ -77,7 +79,7 @@ class JdbcJournalReadStore(
             SELECT q.question
             FROM study_open_questions q
             JOIN journals j ON j.id = q.study_journal_id
-            WHERE j.identity_user_id = ?
+            WHERE j.deleted_at IS NULL AND j.identity_user_id = ?
               AND q.study_journal_id = ?
             ORDER BY q.position ASC
             """
@@ -94,7 +96,7 @@ class JdbcJournalReadStore(
             FROM journals j
             LEFT JOIN investment_journals i ON i.journal_id = j.id
             LEFT JOIN study_journals s ON s.journal_id = j.id
-            WHERE j.identity_user_id = ?
+            WHERE j.deleted_at IS NULL AND j.identity_user_id = ?
             ORDER BY j.occurred_at DESC, j.id DESC
             LIMIT ?
             """
@@ -111,7 +113,7 @@ class JdbcJournalReadStore(
             FROM journals j
             LEFT JOIN investment_journals i ON i.journal_id = j.id
             LEFT JOIN study_journals s ON s.journal_id = j.id
-            WHERE j.identity_user_id = ?
+            WHERE j.deleted_at IS NULL AND j.identity_user_id = ?
               AND (
                   j.occurred_at < ?
                   OR (
@@ -138,6 +140,10 @@ class JdbcJournalReadStore(
                 emotion = resultSet.getString("emotion"),
                 title = resultSet.getString("title"),
                 keyContent = resultSet.getString("key_content"),
+                openQuestions = resultSet.getArray("open_questions").let { questions ->
+                    try { (questions.array as Array<*>).map { it as String } }
+                    finally { questions.free() }
+                },
             )
         }
 

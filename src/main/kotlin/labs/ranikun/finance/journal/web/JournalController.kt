@@ -90,7 +90,19 @@ class JournalController(
     private val journalTimeResolver: JournalTimeResolver,
     private val journalCursorCodec: JournalCursorCodec,
     private val idempotencyKeyValidator: IdempotencyKeyValidator,
+    private val lifecycle: labs.ranikun.finance.journal.application.JournalLifecycleService,
 ) {
+
+    @GetMapping("/deleted")
+    fun deletedList(): Map<String, Any> = lifecycle.deletedList()
+
+    @PostMapping("/{journalId}/delete", consumes = [MediaType.APPLICATION_JSON_VALUE])
+    fun delete(@PathVariable journalId: String, @RequestBody request: Map<String, Any?>) =
+        lifecycle.transition(parseJournalId(journalId), request, false)
+
+    @PostMapping("/{journalId}/restore", consumes = [MediaType.APPLICATION_JSON_VALUE])
+    fun restore(@PathVariable journalId: String, @RequestBody request: Map<String, Any?>) =
+        lifecycle.transition(parseJournalId(journalId), request, true)
 
     @GetMapping
     fun list(request: HttpServletRequest): JournalListResponse {

@@ -35,7 +35,7 @@ class JournalCreateApplicationService(
                 throw exception
             }
 
-            val winner = journalIdempotencyRecovery.find(owner, idempotencyKey)
+            val winner = journalIdempotencyRecovery.find(owner, idempotencyKey, requestFingerprint)
                 ?: throw IdempotencyWinnerNotFoundException(exception)
             if (winner.requestFingerprint != requestFingerprint) {
                 throw IdempotencyKeyReusedException()

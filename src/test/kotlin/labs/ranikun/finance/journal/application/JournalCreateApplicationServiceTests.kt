@@ -71,8 +71,9 @@ class JournalCreateApplicationServiceTests {
                 journalStore = store,
                 idempotencyStore = idempotencyStore,
                 clock = Clock.fixed(Instant.parse("2026-08-12T05:31:00Z"), ZoneOffset.UTC),
+            lifecycle = org.mockito.Mockito.mock(JournalLifecycleService::class.java),
             ),
-            journalIdempotencyRecovery = JournalIdempotencyRecovery(idempotencyStore),
+            journalIdempotencyRecovery = JournalIdempotencyRecovery(idempotencyStore, org.mockito.Mockito.mock(JournalLifecycleService::class.java)),
             constraintViolationDetector = JournalIdempotencyConstraintViolationDetector(),
         )
     }

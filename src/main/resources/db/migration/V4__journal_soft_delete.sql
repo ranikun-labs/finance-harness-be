@@ -1,0 +1,1 @@
+ALTER TABLE journals ADD COLUMN deleted_at TIMESTAMPTZ NULL;

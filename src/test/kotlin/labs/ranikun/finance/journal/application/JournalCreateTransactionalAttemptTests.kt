@@ -92,6 +92,7 @@ class JournalCreateTransactionalAttemptTests {
         journalStore = journalStore,
         idempotencyStore = idempotencyStore,
         clock = Clock.fixed(Instant.parse("2026-08-12T05:31:00Z"), ZoneOffset.UTC),
+            lifecycle = org.mockito.Mockito.mock(JournalLifecycleService::class.java),
     )
 
     private class RecordingJournalIdGenerator(
