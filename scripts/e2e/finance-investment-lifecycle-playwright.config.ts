@@ -16,7 +16,7 @@ export default defineConfig({
   },
   webServer: {
     command: 'node e2e/support/financeInvestmentLifecycleServer.mjs',
-    url: `${baseURL}/e2e/support/finance-investment-lifecycle-harness.html`,
+    url: `${baseURL}/app/journal/new?type=investment`,
     reuseExistingServer: false,
     timeout: 60_000,
   },

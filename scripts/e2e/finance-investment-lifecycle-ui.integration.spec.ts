@@ -2,7 +2,7 @@ import { expect, test, type Request, type Response } from '@playwright/test';
 import { writeFileSync } from 'node:fs';
 import { ko } from '@/i18n/messages/ko';
 
-const HARNESS_PATH = '/e2e/support/finance-investment-lifecycle-harness.html';
+const STANDARD_ENTRY_PATH = '/app/journal/new?type=investment';
 const STAGE_FILE = process.env.E2E_PRIVATE_STAGE_FILE;
 
 function pathIs(request: Request, method: string, pathname: string) {
@@ -40,7 +40,15 @@ test('synthetic reference session runs Investment create, edit, delete, and rest
     const loginResponsePromise = page.waitForResponse((response) =>
       responseIs(response, 'POST', '/api/v1/auth/finance-reference/login'),
     );
-    await page.goto(HARNESS_PATH);
+    const mainEntryResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === 'GET' && url.pathname === '/src/main.tsx';
+    });
+    const navigationResponse = await page.goto(STANDARD_ENTRY_PATH);
+    expect(navigationResponse?.status()).toBe(200);
+    const mainEntryResponse = await mainEntryResponsePromise;
+    expect(mainEntryResponse.status()).toBe(200);
+    await expect(page.locator('script[type="module"][src^="/src/main.tsx"]')).toHaveCount(1);
     await expect(page.getByTestId('auth-entry')).toBeVisible();
     await page.getByLabel(ko.auth.entry.referenceUserId).fill(userId);
     await page.getByLabel(ko.auth.entry.referencePassword).fill(password);

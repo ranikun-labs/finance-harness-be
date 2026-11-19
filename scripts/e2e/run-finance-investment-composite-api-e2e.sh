@@ -191,17 +191,13 @@ E2E_GATEWAY_URL="http://127.0.0.1:$gateway_port" \
 E2E_EXPECTED_SUBJECT="$fixture_account_id" \
 node "$PWD/scripts/e2e/finance-investment-composite-api-e2e.mjs"
 
-# Add a test-only Playwright overlay after verifying the immutable FE source pin. A job-local
-# Vite config merges the pinned /finance proxy with a second local Gateway proxy for reference login.
+# Add a test-only Playwright overlay after verifying the immutable FE source pin. The browser uses
+# the normal index.html -> /src/main.tsx entry with a job-local Gateway proxy for reference login.
 ui_test="$PWD/scripts/e2e/finance-investment-lifecycle-ui.integration.spec.ts"
-ui_harness_tsx="$PWD/scripts/e2e/finance-investment-lifecycle-harness.tsx"
-ui_harness_html="$PWD/scripts/e2e/finance-investment-lifecycle-harness.html"
 ui_vite_config="$PWD/scripts/e2e/finance-investment-lifecycle-vite.config.ts"
 ui_playwright_config="$PWD/scripts/e2e/finance-investment-lifecycle-playwright.config.ts"
 ui_server="$PWD/scripts/e2e/finance-investment-lifecycle-server.mjs"
 install -m 0644 "$ui_test" "$finance_fe_source/e2e/journal-lifecycle.integration.spec.ts"
-install -m 0644 "$ui_harness_tsx" "$finance_fe_source/e2e/support/financeInvestmentLifecycleHarness.tsx"
-install -m 0644 "$ui_harness_html" "$finance_fe_source/e2e/support/finance-investment-lifecycle-harness.html"
 install -m 0644 "$ui_vite_config" "$finance_fe_source/vite.finance-investment-lifecycle.config.ts"
 install -m 0644 "$ui_playwright_config" "$finance_fe_source/playwright.finance-investment-lifecycle.config.ts"
 install -m 0644 "$ui_server" "$finance_fe_source/e2e/support/financeInvestmentLifecycleServer.mjs"
@@ -261,7 +257,7 @@ fe_counts="$(psql -v ON_ERROR_STOP=1 -d finance_db -At -F ',' -c "
   exit 1
 }
 
-ui_summary='Finance FE browser lifecycle: PASS\nflow=synthetic reference login -> Investment create/edit/delete/deleted-list/restore through the pinned AppRouter and same Gateway\nstatuses=login:200,create:201,edit:200,delete:200,deleted_list:200,restore:200\nrevision=0->1->2->3; restored record is active and absent from the deleted list\nsource=Finance FE db97f7f370276c036c8f3eea57c1b6a73bb12006 tree ef476d89cbdc9dd10e6f71a069b8cbf9e9fff2d3\npersisted_counts=owned_journals:2,foreign_owner:0,active_revision_3:2,investment_rows:2,idempotency_rows:2,edited_UI_record:1'
+ui_summary='Finance FE browser lifecycle: PASS\nflow=synthetic reference login -> Investment create/edit/delete/deleted-list/restore through standard /src/main.tsx and same Gateway\nentry=/src/main.tsx\nstatuses=login:200,create:201,edit:200,delete:200,deleted_list:200,restore:200\nrevision=0->1->2->3; restored record is active and absent from the deleted list\nsource=Finance FE db97f7f370276c036c8f3eea57c1b6a73bb12006 tree ef476d89cbdc9dd10e6f71a069b8cbf9e9fff2d3\npersisted_counts=owned_journals:2,foreign_owner:0,active_revision_3:2,investment_rows:2,idempotency_rows:2,edited_UI_record:1'
 printf '%b\n' "$ui_summary"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   printf '%b\n' "$ui_summary" >> "$GITHUB_STEP_SUMMARY"
