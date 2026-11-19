@@ -2,18 +2,8 @@ name: Finance investment composite API E2E
 
 on:
   push:
-    branches:
-      - codex/rpl34-finance-investment-api-e2e-20261118
-    paths:
-      - .github/workflows/finance-investment-composite-api-e2e.yml
-      - scripts/e2e/finance-investment-composite-api-e2e.mjs
-      - scripts/e2e/finance-investment-lifecycle-ui.integration.spec.ts
-      - scripts/e2e/finance-investment-lifecycle-harness.tsx
-      - scripts/e2e/finance-investment-lifecycle-harness.html
-      - scripts/e2e/finance-investment-lifecycle-vite.config.ts
-      - scripts/e2e/finance-investment-lifecycle-playwright.config.ts
-      - scripts/e2e/finance-investment-lifecycle-server.mjs
-      - scripts/e2e/run-finance-investment-composite-api-e2e.sh
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -24,7 +14,7 @@ concurrency:
 
 jobs:
   disposable-composite-e2e:
-    if: github.repository == 'ranikun-labs/finance-harness-be' && github.ref == 'refs/heads/codex/rpl34-finance-investment-api-e2e-20261118'
+    if: github.repository == 'ranikun-labs/finance-harness-be' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     services:
@@ -56,11 +46,11 @@ jobs:
           ref: ${{ github.sha }}
           path: candidate
           persist-credentials: false
-      - name: Check out merged Finance receiver
+      - name: Check out Finance receiver at event SHA
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: ranikun-labs/finance-harness-be
-          ref: 5cab16ab7ba04d0bf65b77b1ebca976d6d29e1dc
+          ref: ${{ github.sha }}
           path: finance-source
           persist-credentials: false
       - name: Check out merged Core and Gateway
@@ -83,18 +73,19 @@ jobs:
           WORKFLOW_SOURCE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          test "$GITHUB_REF" = "refs/heads/codex/rpl34-finance-investment-api-e2e-20261118"
+          test "$GITHUB_REF" = "refs/heads/main"
           test "$(git -C candidate rev-parse HEAD)" = "$WORKFLOW_SOURCE_SHA"
-          test "$(git -C finance-source rev-parse HEAD)" = "5cab16ab7ba04d0bf65b77b1ebca976d6d29e1dc"
-          test "$(git -C finance-source rev-parse 'HEAD^{tree}')" = "d598dadb2677b2ac73488b6ab34f6e278aab009c"
+          test "$(git -C finance-source rev-parse HEAD)" = "$WORKFLOW_SOURCE_SHA"
+          test "$(git -C finance-source rev-parse 'HEAD^{tree}')" = "$(git -C candidate rev-parse 'HEAD^{tree}')"
           test "$(git -C platform-source rev-parse HEAD)" = "5a0b0dc38f1d53655cc21613f9b202a317d7c37d"
           test "$(git -C platform-source rev-parse 'HEAD^{tree}')" = "9057914850b9e0026fa8851cbb062c692a51b4b3"
           test "$(git -C platform-source rev-parse HEAD:gateway-app/src/main/resources/application.yml)" = "16749f29e103292d0f71e2127e79f1f093f4e123"
           test "$(git -C finance-fe-source rev-parse HEAD)" = "db97f7f370276c036c8f3eea57c1b6a73bb12006"
           test "$(git -C finance-fe-source rev-parse 'HEAD^{tree}')" = "ef476d89cbdc9dd10e6f71a069b8cbf9e9fff2d3"
-          printf 'workflow_source_sha=%s\nfinance_source_sha=%s\nfinance_tree=d598dadb2677b2ac73488b6ab34f6e278aab009c\nplatform_source_sha=%s\nplatform_tree=9057914850b9e0026fa8851cbb062c692a51b4b3\nfinance_fe_source_sha=%s\nfinance_fe_tree=ef476d89cbdc9dd10e6f71a069b8cbf9e9fff2d3\ngateway_default_config_blob=16749f29e103292d0f71e2127e79f1f093f4e123\n' \
+          printf 'workflow_source_sha=%s\nfinance_source_sha=%s\nfinance_tree=%s\nplatform_source_sha=%s\nplatform_tree=9057914850b9e0026fa8851cbb062c692a51b4b3\nfinance_fe_source_sha=%s\nfinance_fe_tree=ef476d89cbdc9dd10e6f71a069b8cbf9e9fff2d3\ngateway_default_config_blob=16749f29e103292d0f71e2127e79f1f093f4e123\n' \
             "$WORKFLOW_SOURCE_SHA" \
             "$(git -C finance-source rev-parse HEAD)" \
+            "$(git -C finance-source rev-parse 'HEAD^{tree}')" \
             "$(git -C platform-source rev-parse HEAD)" \
             "$(git -C finance-fe-source rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
       - name: Set up Java 17 and 21
@@ -119,6 +110,8 @@ jobs:
           pnpm exec playwright install --with-deps chromium
       - name: Run exact-source API and browser flows
         working-directory: candidate
+        env:
+          FINANCE_SOURCE_SHA: ${{ github.sha }}
         run: >-
           ./scripts/e2e/run-finance-investment-composite-api-e2e.sh
           "$GITHUB_WORKSPACE/finance-source"

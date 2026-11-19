@@ -12,8 +12,11 @@ FINANCE_REFERENCE_E2E_USER=issue24-e2e-user
 FINANCE_REFERENCE_E2E_PASSWORD=Password123!
 export FINANCE_REFERENCE_E2E_USER FINANCE_REFERENCE_E2E_PASSWORD
 
-expected_finance_sha=5cab16ab7ba04d0bf65b77b1ebca976d6d29e1dc
-expected_finance_tree=d598dadb2677b2ac73488b6ab34f6e278aab009c
+# The workflow checks the candidate and Finance checkout against this immutable event SHA.
+: "${FINANCE_SOURCE_SHA:?Finance event SHA is required}"
+[[ "$FINANCE_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+expected_finance_sha="$FINANCE_SOURCE_SHA"
+expected_finance_tree="$(git -C "$PWD" rev-parse 'HEAD^{tree}')"
 expected_platform_sha=5a0b0dc38f1d53655cc21613f9b202a317d7c37d
 expected_platform_tree=9057914850b9e0026fa8851cbb062c692a51b4b3
 expected_finance_fe_sha=db97f7f370276c036c8f3eea57c1b6a73bb12006
