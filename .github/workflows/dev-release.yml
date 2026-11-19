@@ -39,7 +39,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ranikun-labs/platform-infra/.github/workflows/dev-ecs-release.yml@f28df85ed6bdfbbb842af5055d1a40ba84b59965
+    uses: ranikun-labs/platform-infra/.github/workflows/dev-ecs-release.yml@fdeb22805d9f26779073dc68c6f0a9a166ccb884
     with:
       service: finance
       dockerfile: Dockerfile
