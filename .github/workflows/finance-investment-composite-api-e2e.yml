@@ -2,7 +2,8 @@ name: Finance investment composite API E2E
 
 on:
   push:
-    branches: [codex/rpl34-finance-investment-api-e2e-20261118]
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,7 +14,7 @@ concurrency:
 
 jobs:
   disposable-composite-e2e:
-    if: github.repository == 'ranikun-labs/finance-harness-be' && github.ref == 'refs/heads/codex/rpl34-finance-investment-api-e2e-20261118'
+    if: github.repository == 'ranikun-labs/finance-harness-be' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     services:
@@ -72,7 +73,7 @@ jobs:
           WORKFLOW_SOURCE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          test "$GITHUB_REF" = "refs/heads/codex/rpl34-finance-investment-api-e2e-20261118"
+          test "$GITHUB_REF" = "refs/heads/main"
           test "$(git -C candidate rev-parse HEAD)" = "$WORKFLOW_SOURCE_SHA"
           test "$(git -C finance-source rev-parse HEAD)" = "$WORKFLOW_SOURCE_SHA"
           test "$(git -C finance-source rev-parse 'HEAD^{tree}')" = "$(git -C candidate rev-parse 'HEAD^{tree}')"
