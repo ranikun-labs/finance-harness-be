@@ -1,0 +1,50 @@
+name: DEV OIDC subject diagnostics
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: DEV deployment environment to verify
+        type: choice
+        required: true
+        options:
+          - dev-finance-publish
+          - dev-finance-deploy
+
+permissions:
+  contents: read
+
+jobs:
+  subject:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write
+    steps:
+      - name: Verify OIDC claims
+        env:
+          EXPECTED_PREFIX: 'repo:ranikun-labs@211108135/finance-harness-be@1331151117'
+          EXPECTED_ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          node <<'NODE'
+          const expected = process.env.EXPECTED_PREFIX + ':environment:' + process.env.EXPECTED_ENVIRONMENT;
+          (async () => {
+            const url = new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
+            url.searchParams.set('audience', 'sts.amazonaws.com');
+            const response = await fetch(url, {
+              headers: { Authorization: 'Bearer ' + process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN },
+            });
+            if (!response.ok) throw new Error('OIDC token request failed: ' + response.status);
+            const { value } = await response.json();
+            const claims = JSON.parse(Buffer.from(value.split('.')[1], 'base64url').toString('utf8'));
+            const subjectMatches = claims.sub === expected;
+            const audienceMatches = claims.aud === 'sts.amazonaws.com';
+            console.log('subject matches expected immutable repository and environment: ' + subjectMatches);
+            console.log('audience matches sts.amazonaws.com: ' + audienceMatches);
+            if (!subjectMatches || !audienceMatches) process.exitCode = 1;
+          })().catch(() => {
+            console.error('OIDC diagnostic failed');
+            process.exitCode = 1;
+          });
+          NODE
