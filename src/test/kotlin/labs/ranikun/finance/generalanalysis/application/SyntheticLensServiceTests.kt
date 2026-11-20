@@ -41,10 +41,31 @@ class SyntheticLensServiceTests {
     @Test fun `sector suggestion is single use and invalidated by checklist revision`() {
         assertThat(service.run(q, c, a, SyntheticScenario.MACRO).suggestionId).isNull()
         val id = service.run(q, c, a, SyntheticScenario.SECTOR).suggestionId!!
+        assertThat(service.fixture.reads).isZero()
+        assertThat(service.contribution(UUID.randomUUID(), c, a, id).status).isEqualTo("FAILED")
+        assertThat(service.fixture.reads).isZero()
         assertThat(service.contribution(q, c, a, id).values.map { it.identifier }).containsExactly("SYNTHETIC-A", "SYNTHETIC-B")
+        assertThat(service.fixture.reads).isEqualTo(1)
         assertThat(service.contribution(q, c, a, id).status).isEqualTo("FAILED")
         val stale = service.run(q, c, a, SyntheticScenario.SECTOR).suggestionId!!
         store.saveChecklist(ChecklistResult(c, owner, q, setOf("known_facts"), true, 2))
         assertThat(service.contribution(q, c, a, stale).status).isEqualTo("FAILED")
+        assertThat(service.fixture.reads).isEqualTo(1)
+    }
+    @Test fun `fixture expires and concurrent receipt is consumed once`() {
+        val fixture = SyntheticContributionFixture()
+        val now = Instant.now()
+        fixture.register("expired", now.minusSeconds(5), now.minusSeconds(1), "synthetic-supplement:SECTOR:SECTOR", a)
+        assertThat(fixture.read("expired", now.minusSeconds(5), "synthetic-supplement:SECTOR:SECTOR", a)).isNull()
+        assertThat(fixture.reads).isZero()
+        val id = service.run(q, c, a, SyntheticScenario.SECTOR).suggestionId!!
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(2)
+        try {
+            val gate = java.util.concurrent.CountDownLatch(1)
+            val calls = (1..2).map { pool.submit<String> { gate.await(); service.contribution(q, c, a, id).status } }
+            gate.countDown()
+            assertThat(calls.map { it.get() }).containsExactlyInAnyOrder("COMPLETED", "FAILED")
+            assertThat(service.fixture.reads).isEqualTo(1)
+        } finally { pool.shutdownNow() }
     }
 }

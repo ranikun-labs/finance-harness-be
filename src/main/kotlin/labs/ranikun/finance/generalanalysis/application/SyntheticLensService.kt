@@ -31,21 +31,24 @@ class SyntheticLensService(private val currentUser: CurrentUserPort, private val
     private data class Receipt(val owner: labs.ranikun.finance.identity.application.IdentityUserId, val questionId: UUID, val checklistId: UUID, val analysisId: UUID, val snapshotId: String, val source: String, val asOf: Instant, val expiresAt: Instant)
     // Approved local fixture registry: values are invented index contributions, not returns.
     private val contributionSource = "synthetic-supplement:SECTOR:SECTOR"
+    internal val fixture = SyntheticContributionFixture()
     private val receipts = java.util.concurrent.ConcurrentHashMap<UUID, Receipt>()
     data class Contribution(val identifier: String, val indexContribution: Double)
     data class ContributionResult(val status: String, val source: String?, val asOf: Instant?, val values: List<Contribution>)
     fun contribution(questionId: UUID, checklistId: UUID, analysisId: UUID, suggestionId: UUID): ContributionResult {
         val failed = ContributionResult("FAILED", null, null, emptyList())
         val owner = currentUser.currentUserId()
-        val receipt = receipts.remove(suggestionId) ?: return failed
-        if (receipt.owner != owner || receipt.questionId != questionId || receipt.checklistId != checklistId || receipt.analysisId != analysisId || !receipt.expiresAt.isAfter(Instant.now()) || receipt.asOf.isAfter(Instant.now()) || receipt.snapshotId.isBlank() || receipt.source != contributionSource) return failed
+        val receipt = receipts[suggestionId] ?: return failed
+        if (receipt.owner != owner || receipt.questionId != questionId || receipt.checklistId != checklistId || receipt.analysisId != analysisId) return failed
+        if (!receipts.remove(suggestionId, receipt)) return failed
+        if (!receipt.expiresAt.isAfter(Instant.now()) || receipt.asOf.isAfter(Instant.now()) || receipt.snapshotId.isBlank() || receipt.source != contributionSource) return failed
         val question = store.findQuestion(owner, questionId) ?: return failed
         val checklist = store.findChecklist(owner, checklistId) ?: return failed
         val analysis = store.findAnalysis(owner, analysisId) ?: return failed
         if (try { policy.classify(question.text) != PolicyClassification.SAFE_GENERAL } catch (_: Exception) { true }) return failed
         if (checklist.questionId != questionId || !checklist.confirmed || analysis.questionId != questionId || analysis.checklistId != checklistId || analysis.status != GeneralAnalysisStatus.COMPLETED || analysis.output == null || checklist.revision != analysis.checklistRevision || checklist.checkedItemIds != analysis.checkedItemIds) return failed
         // Registry metadata binds this fixed fixture to the validated sector source revision.
-        val values = listOf(Contribution("SYNTHETIC-A", 0.6), Contribution("SYNTHETIC-B", 0.4))
+        val values = fixture.read(receipt.snapshotId, receipt.asOf, receipt.source, receipt.analysisId) ?: return failed
         val current = store.findChecklist(owner, checklistId) ?: return failed
         val currentQuestion = store.findQuestion(owner, questionId) ?: return failed
         val currentAnalysis = store.findAnalysis(owner, analysisId) ?: return failed
@@ -78,7 +81,7 @@ class SyntheticLensService(private val currentUser: CurrentUserPort, private val
             }
             if (!unchanged() || !validBasic(basic, scenario)) return failed("FAILED", basicCalls, supplementalCalls)
             receipts.entries.removeIf { !it.value.expiresAt.isAfter(Instant.now()) }
-            val suggestionId = if (lens == SyntheticNextLens.SECTOR && scenario == SyntheticScenario.SECTOR) UUID.randomUUID().also { receipts[it] = Receipt(owner, questionId, checklistId, analysisId, basic.snapshotId, contributionSource, basic.asOf, basic.expiresAt) } else null
+            val suggestionId = if (lens == SyntheticNextLens.SECTOR && scenario == SyntheticScenario.SECTOR) UUID.randomUUID().also { receipts[it] = Receipt(owner, questionId, checklistId, analysisId, basic.snapshotId, contributionSource, basic.asOf, basic.expiresAt); fixture.register(basic.snapshotId, basic.asOf, basic.expiresAt, contributionSource, analysisId) } else null
             SyntheticLensResult("COMPLETED", basic.facts + extra, when (lens) { SyntheticNextLens.SECTOR -> "Sector concentration is the stronger or tied synthetic signal."; SyntheticNextLens.MACRO -> "Broad macro is the stronger synthetic signal."; null -> "Both synthetic signals are weak; no further lens." }, lens, basicCalls, supplementalCalls, basic.asOf, "SYNTHETIC_FIXTURE", suggestionId)
         } catch (_: Exception) { failed("FAILED", basicCalls, supplementalCalls) }
     }
@@ -94,4 +97,22 @@ class SyntheticLensService(private val currentUser: CurrentUserPort, private val
         val LOOKUP_EXECUTOR = ThreadPoolExecutor(0, 2, 30, TimeUnit.SECONDS, SynchronousQueue(), { task -> Thread(task, "synthetic-lookup").apply { isDaemon = true } })
     }
     private fun failed(status: String, basicCalls: Int = 0, supplementalCalls: Int = 0) = SyntheticLensResult(status, emptyList(), null, null, basicCalls, supplementalCalls, null, "SYNTHETIC_FIXTURE")
+}
+
+/** Local-only invented index contributions, scoped to the validated snapshot metadata. */
+internal class SyntheticContributionFixture {
+    private data class Key(val snapshotId: String, val asOf: Instant, val source: String, val analysisId: UUID)
+    private val registry = java.util.concurrent.ConcurrentHashMap<Key, Instant>()
+    private val count = java.util.concurrent.atomic.AtomicInteger()
+    val reads: Int get() = count.get()
+    fun register(snapshotId: String, asOf: Instant, expiresAt: Instant, source: String, analysisId: UUID) {
+        registry.entries.removeIf { !it.value.isAfter(Instant.now()) }
+        if (source == "synthetic-supplement:SECTOR:SECTOR") registry[Key(snapshotId, asOf, source, analysisId)] = expiresAt
+    }
+    fun read(snapshotId: String, asOf: Instant, source: String, analysisId: UUID): List<SyntheticLensService.Contribution>? {
+        val expiresAt = registry.remove(Key(snapshotId, asOf, source, analysisId)) ?: return null
+        if (!expiresAt.isAfter(Instant.now()) || asOf.isAfter(Instant.now())) return null
+        count.incrementAndGet()
+        return listOf(SyntheticLensService.Contribution("SYNTHETIC-A", 0.6), SyntheticLensService.Contribution("SYNTHETIC-B", 0.4))
+    }
 }
