@@ -80,6 +80,7 @@ class GeneralAnalysisApplicationService(
         )
     }
 
+    @Synchronized
     fun confirmChecklist(
         questionId: UUID,
         checklistId: UUID,

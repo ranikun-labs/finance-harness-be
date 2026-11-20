@@ -21,7 +21,7 @@ class SyntheticLensServiceTests {
     private val actual = InMemorySyntheticLookup()
     private val lookup = object : SyntheticLookup {
         var basicCalls = 0; var extraCalls = 0; var mode = "ok"
-        override fun basic(scenario: SyntheticScenario): SyntheticBasic? { basicCalls++; if (mode == "timeout") throw IllegalStateException(); if (mode == "missing") return null; val b = actual.basic(scenario); if (mode == "stale") store.saveChecklist(ChecklistResult(c, owner, q, setOf("known_facts"), true, 2)); return when (mode) { "expired" -> b.copy(asOf = Instant.now().minusSeconds(120), expiresAt = Instant.now().minusSeconds(1)); "bad-source" -> b.copy(facts = b.facts.map { it.copy(source = "other") }); else -> b } }
+        override fun basic(scenario: SyntheticScenario): SyntheticBasic? { basicCalls++; if (mode == "timeout") Thread.sleep(5000); if (mode == "missing") return null; val b = actual.basic(scenario); if (mode == "stale") store.saveChecklist(ChecklistResult(c, owner, q, setOf("known_facts"), true, 2)); return when (mode) { "expired" -> b.copy(asOf = Instant.now().minusSeconds(120), expiresAt = Instant.now().minusSeconds(1)); "bad-source" -> b.copy(facts = b.facts.map { it.copy(source = "other") }); else -> b } }
         override fun supplemental(scenario: SyntheticScenario, lens: SyntheticNextLens, snapshotId: String): SyntheticSupplement? { extraCalls++; val e = actual.supplemental(scenario, lens, snapshotId); return if (mode == "mismatch") e.copy(snapshotId = "other") else e }
     }
     private val service = SyntheticLensService(current, store, policy, lookup)
@@ -36,6 +36,6 @@ class SyntheticLensServiceTests {
         policy.result = PolicyClassification.SAFE_GENERAL; store.saveChecklist(ChecklistResult(c, owner, q, setOf("known_facts"), true, 2)); assertThatThrownBy { service.run(q,c,a,SyntheticScenario.SECTOR) }.isInstanceOf(ChecklistQuestionMismatchException::class.java); assertThat(lookup.basicCalls).isZero()
     }
     @Test fun `missing timeout expired and mismatched evidence fail closed`() {
-        for (mode in listOf("missing", "timeout", "expired", "bad-source", "mismatch", "stale")) { lookup.mode = mode; lookup.basicCalls = 0; lookup.extraCalls = 0; val result = service.run(q,c,a,SyntheticScenario.SECTOR); assertThat(result.status).isEqualTo("FAILED"); assertThat(result.facts).isEmpty(); assertThat(lookup.extraCalls).isEqualTo(if (mode == "mismatch") 1 else 0) }
+        for (mode in listOf("missing", "timeout", "expired", "bad-source", "mismatch", "stale")) { val start = System.nanoTime(); lookup.mode = mode; lookup.basicCalls = 0; lookup.extraCalls = 0; val result = service.run(q,c,a,SyntheticScenario.SECTOR); assertThat(result.status).isEqualTo("FAILED"); if (mode == "timeout") assertThat((System.nanoTime() - start) / 1_000_000).isLessThan(3000); assertThat(result.facts).isEmpty(); assertThat(lookup.extraCalls).isEqualTo(if (mode == "mismatch") 1 else 0) }
     }
 }

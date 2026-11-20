@@ -37,6 +37,18 @@ class GeneralAnalysisApplicationServiceTests {
     }
 
     @Test
+    fun concurrentConfirmationsHaveDistinctRevisions() {
+        val setup = Harness()
+        val question = setup.service.createQuestion("What facts should I verify?")
+        val executor = java.util.concurrent.Executors.newFixedThreadPool(8)
+        try {
+            val tasks = (1..20).map { java.util.concurrent.Callable { setup.service.confirmChecklist(question.questionId, question.checklistId, emptySet(), true).revision } }
+            val revisions = executor.invokeAll(tasks).map { it.get() }
+            assertThat(revisions.sorted()).isEqualTo((1L..20L).toList())
+        } finally { executor.shutdownNow() }
+    }
+
+    @Test
     fun unconfirmedChecklistBlocksExecution() {
         val setup = Harness()
         val question = setup.service.createQuestion("How should I think about this?")
