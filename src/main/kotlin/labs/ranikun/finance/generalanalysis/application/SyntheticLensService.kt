@@ -18,7 +18,7 @@ enum class SyntheticNextLens { SECTOR, MACRO }
 data class SyntheticFact(val id: String, val source: String, val value: String)
 data class SyntheticBasic(val sector: Double, val macro: Double, val facts: List<SyntheticFact>, val snapshotId: String, val asOf: Instant, val expiresAt: Instant)
 data class SyntheticSupplement(val snapshotId: String, val facts: List<SyntheticFact>)
-data class SyntheticLensResult(val status: String, val facts: List<SyntheticFact>, val interpretation: String?, val nextLens: SyntheticNextLens?, val basicCalls: Int, val supplementalCalls: Int, val asOf: Instant?, val fixtureLabel: String)
+data class SyntheticLensResult(val status: String, val facts: List<SyntheticFact>, val interpretation: String?, val nextLens: SyntheticNextLens?, val basicCalls: Int, val supplementalCalls: Int, val asOf: Instant?, val fixtureLabel: String, val suggestionId: UUID? = null)
 interface SyntheticLookup {
     fun basic(scenario: SyntheticScenario): SyntheticBasic?
     fun supplemental(scenario: SyntheticScenario, lens: SyntheticNextLens, snapshotId: String): SyntheticSupplement?
@@ -28,6 +28,30 @@ interface SyntheticLookup {
 @Profile("!prod & !production & (local | test)")
 @ConditionalOnProperty(prefix = "finance.shared-ai", name = ["enabled"], havingValue = "false", matchIfMissing = true)
 class SyntheticLensService(private val currentUser: CurrentUserPort, private val store: GeneralAnalysisStore, private val policy: GeneralAnalysisPolicyGuard, private val lookup: SyntheticLookup) {
+    private data class Receipt(val owner: labs.ranikun.finance.identity.application.IdentityUserId, val questionId: UUID, val checklistId: UUID, val analysisId: UUID, val snapshotId: String, val source: String, val asOf: Instant, val expiresAt: Instant)
+    // Approved local fixture registry: values are invented index contributions, not returns.
+    private val contributionSource = "synthetic-supplement:SECTOR:SECTOR"
+    private val receipts = java.util.concurrent.ConcurrentHashMap<UUID, Receipt>()
+    data class Contribution(val identifier: String, val indexContribution: Double)
+    data class ContributionResult(val status: String, val source: String?, val asOf: Instant?, val values: List<Contribution>)
+    fun contribution(questionId: UUID, checklistId: UUID, analysisId: UUID, suggestionId: UUID): ContributionResult {
+        val failed = ContributionResult("FAILED", null, null, emptyList())
+        val owner = currentUser.currentUserId()
+        val receipt = receipts.remove(suggestionId) ?: return failed
+        if (receipt.owner != owner || receipt.questionId != questionId || receipt.checklistId != checklistId || receipt.analysisId != analysisId || !receipt.expiresAt.isAfter(Instant.now()) || receipt.asOf.isAfter(Instant.now()) || receipt.snapshotId.isBlank() || receipt.source != contributionSource) return failed
+        val question = store.findQuestion(owner, questionId) ?: return failed
+        val checklist = store.findChecklist(owner, checklistId) ?: return failed
+        val analysis = store.findAnalysis(owner, analysisId) ?: return failed
+        if (try { policy.classify(question.text) != PolicyClassification.SAFE_GENERAL } catch (_: Exception) { true }) return failed
+        if (checklist.questionId != questionId || !checklist.confirmed || analysis.questionId != questionId || analysis.checklistId != checklistId || analysis.status != GeneralAnalysisStatus.COMPLETED || analysis.output == null || checklist.revision != analysis.checklistRevision || checklist.checkedItemIds != analysis.checkedItemIds) return failed
+        // Registry metadata binds this fixed fixture to the validated sector source revision.
+        val values = listOf(Contribution("SYNTHETIC-A", 0.6), Contribution("SYNTHETIC-B", 0.4))
+        val current = store.findChecklist(owner, checklistId) ?: return failed
+        val currentQuestion = store.findQuestion(owner, questionId) ?: return failed
+        val currentAnalysis = store.findAnalysis(owner, analysisId) ?: return failed
+        if (currentQuestion != question || currentAnalysis != analysis || current.questionId != questionId || current.revision != checklist.revision || current.checkedItemIds != checklist.checkedItemIds || !current.confirmed || !receipt.expiresAt.isAfter(Instant.now()) || try { policy.classify(currentQuestion.text) != PolicyClassification.SAFE_GENERAL } catch (_: Exception) { true }) return failed
+        return ContributionResult("COMPLETED", contributionSource, receipt.asOf, values)
+    }
     fun run(questionId: UUID, checklistId: UUID, analysisId: UUID, scenario: SyntheticScenario): SyntheticLensResult {
         val owner = currentUser.currentUserId()
         val question = store.findQuestion(owner, questionId) ?: throw QuestionNotFoundException()
@@ -53,7 +77,9 @@ class SyntheticLensService(private val currentUser: CurrentUserPort, private val
                 supplement.facts
             }
             if (!unchanged() || !validBasic(basic, scenario)) return failed("FAILED", basicCalls, supplementalCalls)
-            SyntheticLensResult("COMPLETED", basic.facts + extra, when (lens) { SyntheticNextLens.SECTOR -> "Sector concentration is the stronger or tied synthetic signal."; SyntheticNextLens.MACRO -> "Broad macro is the stronger synthetic signal."; null -> "Both synthetic signals are weak; no further lens." }, lens, basicCalls, supplementalCalls, basic.asOf, "SYNTHETIC_FIXTURE")
+            receipts.entries.removeIf { !it.value.expiresAt.isAfter(Instant.now()) }
+            val suggestionId = if (lens == SyntheticNextLens.SECTOR && scenario == SyntheticScenario.SECTOR) UUID.randomUUID().also { receipts[it] = Receipt(owner, questionId, checklistId, analysisId, basic.snapshotId, contributionSource, basic.asOf, basic.expiresAt) } else null
+            SyntheticLensResult("COMPLETED", basic.facts + extra, when (lens) { SyntheticNextLens.SECTOR -> "Sector concentration is the stronger or tied synthetic signal."; SyntheticNextLens.MACRO -> "Broad macro is the stronger synthetic signal."; null -> "Both synthetic signals are weak; no further lens." }, lens, basicCalls, supplementalCalls, basic.asOf, "SYNTHETIC_FIXTURE", suggestionId)
         } catch (_: Exception) { failed("FAILED", basicCalls, supplementalCalls) }
     }
     private fun validBasic(b: SyntheticBasic, scenario: SyntheticScenario): Boolean = b.snapshotId.isNotBlank() && b.snapshotId.length <= 100 && !b.asOf.isAfter(Instant.now()) && b.expiresAt.isAfter(Instant.now()) && Duration.between(b.asOf, b.expiresAt) <= Duration.ofMinutes(5) && (b.sector to b.macro) == when (scenario) { SyntheticScenario.SECTOR -> 0.8 to 0.4; SyntheticScenario.MACRO -> 0.3 to 0.9; SyntheticScenario.WEAK -> 0.2 to 0.3 } && b.sector.isFinite() && b.macro.isFinite() && b.sector in 0.0..1.0 && b.macro in 0.0..1.0 && b.facts.size == 2 && b.facts.map { it.id }.toSet() == setOf("sector", "macro") && b.facts.all { it.source == "synthetic-basic:${scenario.name}" && it.value.isNotBlank() && it.value.length <= 100 } && b.facts.single { it.id == "sector" }.value == b.sector.toString() && b.facts.single { it.id == "macro" }.value == b.macro.toString()

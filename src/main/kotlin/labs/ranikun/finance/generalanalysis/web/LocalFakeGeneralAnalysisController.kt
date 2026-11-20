@@ -8,6 +8,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Profile
 import org.springframework.web.bind.annotation.*
 
+data class SyntheticContributionRequest(val checklistId: String, val analysisId: String, val suggestionId: String)
+
 data class SyntheticLensRequest(val checklistId: String, val analysisId: String, val scenario: SyntheticScenario)
 
 /** Separate local-only surface exists only when the deterministic execution adapter is selected. */
@@ -18,6 +20,9 @@ data class SyntheticLensRequest(val checklistId: String, val analysisId: String,
 class LocalFakeGeneralAnalysisController(private val delegate: GeneralAnalysisController, private val syntheticLens: SyntheticLensService) {
     @PostMapping("/questions/{questionId}/synthetic-lens")
     fun syntheticLens(@PathVariable questionId: String, @RequestBody request: SyntheticLensRequest) = syntheticLens.run(parseId(questionId), parseId(request.checklistId), parseId(request.analysisId), request.scenario)
+
+    @PostMapping("/questions/{questionId}/synthetic-contribution")
+    fun contribution(@PathVariable questionId: String, @RequestBody request: SyntheticContributionRequest) = syntheticLens.contribution(parseId(questionId), parseId(request.checklistId), parseId(request.analysisId), parseId(request.suggestionId))
 
     private fun parseId(value: String) = try { UUID.fromString(value) } catch (_: IllegalArgumentException) { throw InvalidGeneralAnalysisRequestException() }
 

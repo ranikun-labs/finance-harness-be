@@ -38,4 +38,13 @@ class SyntheticLensServiceTests {
     @Test fun `missing timeout expired and mismatched evidence fail closed`() {
         for (mode in listOf("missing", "timeout", "expired", "bad-source", "mismatch", "stale")) { val start = System.nanoTime(); lookup.mode = mode; lookup.basicCalls = 0; lookup.extraCalls = 0; val result = service.run(q,c,a,SyntheticScenario.SECTOR); assertThat(result.status).isEqualTo("FAILED"); if (mode == "timeout") assertThat((System.nanoTime() - start) / 1_000_000).isLessThan(3000); assertThat(result.facts).isEmpty(); assertThat(lookup.extraCalls).isEqualTo(if (mode == "mismatch") 1 else 0) }
     }
+    @Test fun `sector suggestion is single use and invalidated by checklist revision`() {
+        assertThat(service.run(q, c, a, SyntheticScenario.MACRO).suggestionId).isNull()
+        val id = service.run(q, c, a, SyntheticScenario.SECTOR).suggestionId!!
+        assertThat(service.contribution(q, c, a, id).values.map { it.identifier }).containsExactly("SYNTHETIC-A", "SYNTHETIC-B")
+        assertThat(service.contribution(q, c, a, id).status).isEqualTo("FAILED")
+        val stale = service.run(q, c, a, SyntheticScenario.SECTOR).suggestionId!!
+        store.saveChecklist(ChecklistResult(c, owner, q, setOf("known_facts"), true, 2))
+        assertThat(service.contribution(q, c, a, stale).status).isEqualTo("FAILED")
+    }
 }
