@@ -154,6 +154,9 @@ class FinanceTrustedContextFilter(
         path == "$JOURNAL_PATH/deleted" -> method == "GET"
         (path.endsWith("/delete") || path.endsWith("/restore")) &&
             LOWERCASE_JOURNAL_ID.matches(path.substringBeforeLast('/')) -> method == "POST"
+        path.endsWith("/retrospectives") &&
+            LOWERCASE_JOURNAL_ID.matches(path.removeSuffix("/retrospectives")) -> method == "GET" || method == "POST"
+        RETROSPECTIVE_DETAIL.matches(path) -> method == "GET"
         path == JOURNAL_PATH -> method == "GET" || method == "POST"
         LOWERCASE_JOURNAL_ID.matches(path) -> method == "GET" || method == "PATCH"
         else -> false
@@ -199,9 +202,9 @@ class FinanceTrustedContextFilter(
             "x-identity-user-id",
         )
         private val CANONICAL_BASE64URL = Regex("[A-Za-z0-9_-]+")
-        private val LOWERCASE_JOURNAL_ID = Regex(
-            "/finance/journals/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
-        )
+        private const val LOWERCASE_UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+        private val LOWERCASE_JOURNAL_ID = Regex("$JOURNAL_PATH/$LOWERCASE_UUID")
+        private val RETROSPECTIVE_DETAIL = Regex("$JOURNAL_PATH/$LOWERCASE_UUID/retrospectives/$LOWERCASE_UUID")
     }
 }
 

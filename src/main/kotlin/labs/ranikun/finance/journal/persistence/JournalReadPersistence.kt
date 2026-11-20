@@ -35,13 +35,14 @@ class JdbcJournalReadStore(
             journalId,
         )
 
-    override fun findList(owner: IdentityUserId, cursor: JournalCursor?, limitPlusOne: Int): List<JournalListRecord> {
-        val sql = if (cursor == null) LIST_SQL else LIST_SQL_WITH_CURSOR
+    override fun findList(owner: IdentityUserId, cursor: JournalCursor?, limitPlusOne: Int, type: String?): List<JournalListRecord> {
+        val baseSql = if (cursor == null) LIST_SQL else LIST_SQL_WITH_CURSOR
+        val sql = if (type == null) baseSql else baseSql.replace("AND j.identity_user_id = ?", "AND j.identity_user_id = ? AND j.type = ?")
         val arguments = if (cursor == null) {
-            arrayOf<Any>(owner.value, limitPlusOne)
+            if (type == null) arrayOf<Any>(owner.value, limitPlusOne) else arrayOf<Any>(owner.value, type, limitPlusOne)
         } else {
             arrayOf<Any>(
-                owner.value,
+                *if (type == null) arrayOf<Any>(owner.value) else arrayOf<Any>(owner.value, type),
                 Timestamp.from(cursor.occurredAtUtc),
                 Timestamp.from(cursor.occurredAtUtc),
                 cursor.journalId,

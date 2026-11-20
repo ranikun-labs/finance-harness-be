@@ -222,7 +222,7 @@ class JournalReadApplicationServiceTests {
 
         override fun findStudyOpenQuestions(owner: IdentityUserId, journalId: UUID): List<String> = emptyList()
 
-        override fun findList(owner: IdentityUserId, cursor: JournalCursor?, limitPlusOne: Int): List<JournalListRecord> {
+        override fun findList(owner: IdentityUserId, cursor: JournalCursor?, limitPlusOne: Int, type: String?): List<JournalListRecord> {
             listOwners += owner
             return emptyList()
         }

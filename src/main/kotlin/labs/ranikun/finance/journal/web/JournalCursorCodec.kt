@@ -16,13 +16,14 @@ class JournalCursorCodec(
 ) {
 
     fun encode(cursor: JournalCursor): String {
-        require(cursor.version == VERSION) { "Unsupported cursor version" }
+        require((cursor.version == VERSION && cursor.type == null) || (cursor.version == 2 && cursor.type in setOf("investment", "study"))) { "Unsupported cursor version" }
         val payload = CursorPayload(
             version = cursor.version,
             occurredAtUtc = cursor.occurredAtUtc.toString(),
             journalId = cursor.journalId.toString(),
         )
-        return URL_ENCODER.encodeToString(jsonMapper.writeValueAsBytes(payload))
+        val bytes = if (cursor.type == null) jsonMapper.writeValueAsBytes(payload) else jsonMapper.writeValueAsBytes(FilteredCursorPayload(cursor.version, cursor.occurredAtUtc.toString(), cursor.journalId.toString(), cursor.type))
+        return URL_ENCODER.encodeToString(bytes)
     }
 
     fun decode(rawCursor: String): JournalCursor {
@@ -45,15 +46,20 @@ class JournalCursorCodec(
         } catch (exception: Exception) {
             throw IllegalArgumentException("Invalid cursor JSON", exception)
         }
-        if (!node.isObject || node.size() != 3 || !node.has("version") ||
+        if (!node.isObject || node.size() !in 3..4 || !node.has("version") ||
             !node.has("occurredAtUtc") || !node.has("journalId")
         ) {
             throw IllegalArgumentException("Invalid cursor shape")
         }
 
         val versionNode = node.get("version")
-        if (!versionNode.isInt || versionNode.intValue() != VERSION) {
+        if (!versionNode.isInt || versionNode.intValue() !in 1..2) {
             throw IllegalArgumentException("Unsupported cursor version")
+        }
+        val version = versionNode.intValue()
+        val type = if (version == 2 && node.size() == 4) requiredString(node, "type") else null
+        if ((version == 1 && node.size() != 3) || (version == 2 && type !in setOf("investment", "study"))) {
+            throw IllegalArgumentException("Invalid cursor filter")
         }
         val occurredAtUtc = requiredString(node, "occurredAtUtc")
         if (!occurredAtUtc.endsWith("Z")) {
@@ -69,7 +75,7 @@ class JournalCursorCodec(
         if (!decoded.contentEquals(jsonMapper.writeValueAsBytes(node))) {
             throw IllegalArgumentException("Cursor JSON must be canonical")
         }
-        return JournalCursor(VERSION, occurredAtInstant, journalId)
+        return JournalCursor(version, occurredAtInstant, journalId, type)
     }
 
     private fun requiredString(node: JsonNode, fieldName: String): String =
@@ -91,6 +97,13 @@ class JournalCursorCodec(
         @JsonProperty("version") val version: Int,
         @JsonProperty("occurredAtUtc") val occurredAtUtc: String,
         @JsonProperty("journalId") val journalId: String,
+    )
+
+    private data class FilteredCursorPayload(
+        @JsonProperty("version") val version: Int,
+        @JsonProperty("occurredAtUtc") val occurredAtUtc: String,
+        @JsonProperty("journalId") val journalId: String,
+        @JsonProperty("type") val type: String,
     )
 
     private companion object {

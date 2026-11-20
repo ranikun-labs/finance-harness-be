@@ -103,6 +103,28 @@ class JournalReadListApiIntegrationTests {
     }
 
     @Test
+    fun filteredPaginationAppliesTypeBeforeLimitAndBindsCursor() {
+        insertStudy(uuid("00000000-0000-7000-8000-000000000001"), Instant.parse("2026-08-12T07:00:00Z"), LocalDateTime.of(2026, 8, 12, 16, 0), "newer study")
+        insertInvestment(uuid("00000000-0000-7000-8000-000000000002"), Instant.parse("2026-08-12T06:00:00Z"), LocalDateTime.of(2026, 8, 12, 15, 0), "first")
+        insertInvestment(uuid("00000000-0000-7000-8000-000000000003"), Instant.parse("2026-08-12T05:00:00Z"), LocalDateTime.of(2026, 8, 12, 14, 0), "second")
+
+        val first = mockMvc.perform(get("/finance/journals").param("limit", "1").param("type", "investment"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.items[0].assetName").value("first"))
+            .andExpect(jsonPath("$.nextCursor").isString)
+            .andReturn()
+        val cursor = jsonMapper.readTree(first.response.contentAsString).get("nextCursor").stringValue()
+        mockMvc.perform(get("/finance/journals").param("limit", "1").param("type", "investment").param("cursor", cursor))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.items[0].assetName").value("second"))
+            .andExpect(jsonPath("$.nextCursor").value(null))
+        mockMvc.perform(get("/finance/journals").param("type", "study").param("cursor", cursor))
+            .andExpect(status().isBadRequest)
+        mockMvc.perform(get("/finance/journals").param("type", "invalid"))
+            .andExpect(status().isBadRequest)
+    }
+
+    @Test
     fun equalOccurredAtUsesJournalIdDescendingAsTieBreaker() {
         val occurredAt = Instant.parse("2026-08-12T05:00:00Z")
         insertInvestment(
