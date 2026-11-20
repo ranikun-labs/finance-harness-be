@@ -161,6 +161,7 @@ class IdentityAndLocalAdapterTests {
                 owner: IdentityUserId,
                 cursor: JournalCursor?,
                 limitPlusOne: Int,
+                type: String?,
             ): List<JournalListRecord> = emptyList()
         }
     }

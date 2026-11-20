@@ -110,7 +110,14 @@ class JournalController(
         val cursorValues = request.getParameterValues("cursor")?.toList()
         val limit = parseLimit(singleParameter("limit", limitValues))
         val cursor = singleParameter("cursor", cursorValues)?.let(::parseCursor)
-        val page = journalReadApplicationService.findList(limit, cursor)
+        val type = singleParameter("type", request.getParameterValues("type")?.toList())
+        if (type != null && type !in setOf("investment", "study")) {
+            throw InvalidJournalRequestException(listOf(JournalFieldError("type", "invalid")))
+        }
+        if (cursor != null && cursor.type != type) {
+            throw InvalidJournalRequestException(listOf(JournalFieldError("cursor", "invalid")))
+        }
+        val page = journalReadApplicationService.findList(limit, cursor, type)
         return JournalListResponse(
             items = page.items.map { item -> item.toResponse() },
             nextCursor = page.nextCursor?.let(journalCursorCodec::encode),

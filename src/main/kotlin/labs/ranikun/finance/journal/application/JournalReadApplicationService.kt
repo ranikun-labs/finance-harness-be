@@ -13,7 +13,7 @@ interface JournalReadStore {
 
     fun findStudyOpenQuestions(owner: IdentityUserId, journalId: UUID): List<String>
 
-    fun findList(owner: IdentityUserId, cursor: JournalCursor?, limitPlusOne: Int): List<JournalListRecord>
+    fun findList(owner: IdentityUserId, cursor: JournalCursor?, limitPlusOne: Int, type: String? = null): List<JournalListRecord>
 }
 
 data class JournalDetailRecord(
@@ -37,6 +37,7 @@ data class JournalCursor(
     val version: Int,
     val occurredAtUtc: Instant,
     val journalId: UUID,
+    val type: String? = null,
 )
 
 data class JournalListRecord(
@@ -132,15 +133,16 @@ class JournalReadApplicationService(
         }
     }
 
-    fun findList(limit: Int, cursor: JournalCursor?): JournalListPage {
+    fun findList(limit: Int, cursor: JournalCursor?, type: String? = null): JournalListPage {
         val owner = currentUserPort.currentUserId()
-        val rows = journalReadStore.findList(owner, cursor, limit + 1)
+        val rows = journalReadStore.findList(owner, cursor, limit + 1, type)
         val hasNextPage = rows.size > limit
         val items = if (hasNextPage) rows.take(limit) else rows
         val nextCursor = if (hasNextPage) {
             items.last().let { last ->
                 JournalCursor(
-                    version = CURSOR_VERSION,
+                    version = if (type == null) CURSOR_VERSION else 2,
+                    type = type,
                     occurredAtUtc = last.occurredAtUtc,
                     journalId = last.journalId,
                 )
