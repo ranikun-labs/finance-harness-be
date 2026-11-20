@@ -22,6 +22,7 @@ class LocalFakeGeneralAnalysisConditionTests {
     @Configuration(proxyBeanMethods = false)
     @Import(LocalFakeGeneralAnalysisController::class)
     class Config {
+        @Bean fun syntheticLens(): labs.ranikun.finance.generalanalysis.application.SyntheticLensService = mock(labs.ranikun.finance.generalanalysis.application.SyntheticLensService::class.java)
         @Bean fun delegate(): GeneralAnalysisController = mock(GeneralAnalysisController::class.java)
     }
 }

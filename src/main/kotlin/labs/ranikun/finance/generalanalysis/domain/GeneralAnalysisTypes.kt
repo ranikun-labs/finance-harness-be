@@ -21,6 +21,7 @@ data class ChecklistResult(
     val questionId: UUID,
     val checkedItemIds: Set<String>,
     val confirmed: Boolean,
+    val revision: Long = 0,
 )
 
 enum class GeneralAnalysisStatus {
@@ -45,4 +46,7 @@ data class GeneralAnalysisRecord(
     val questionId: UUID,
     val status: GeneralAnalysisStatus,
     val output: GeneralAnalysisCandidate? = null,
+    val checklistId: UUID? = null,
+    val checkedItemIds: Set<String>? = null,
+    val checklistRevision: Long? = null,
 )

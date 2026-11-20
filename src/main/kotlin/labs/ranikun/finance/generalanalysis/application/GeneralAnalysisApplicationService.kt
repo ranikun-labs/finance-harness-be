@@ -93,7 +93,7 @@ class GeneralAnalysisApplicationService(
         if (checkedItemIds.any { selected -> CHECKLIST_ITEMS.none { it.id == selected } }) {
             throw InvalidChecklistSelectionException()
         }
-        val updated = checklist.copy(checkedItemIds = checkedItemIds, confirmed = confirmed)
+        val updated = checklist.copy(checkedItemIds = checkedItemIds, confirmed = confirmed, revision = checklist.revision + 1)
         store.saveChecklist(updated)
         return updated
     }
@@ -110,6 +110,9 @@ class GeneralAnalysisApplicationService(
             owner = owner,
             questionId = question.id,
             status = GeneralAnalysisStatus.REQUESTED,
+            checklistId = checklist.id,
+            checkedItemIds = checklist.checkedItemIds.toSet(),
+            checklistRevision = checklist.revision,
         )
         store.saveAnalysis(analysis)
 
