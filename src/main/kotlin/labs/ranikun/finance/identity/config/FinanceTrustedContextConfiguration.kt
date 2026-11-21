@@ -58,7 +58,11 @@ class FinanceTrustedContextConfiguration : EnvironmentAware {
         check(',' !in serviceSecret) {
             "The trusted Finance context caller value cannot contain a comma"
         }
-        return FinanceTrustedContextReferenceSettings(serviceSecret)
+        val holdingEnabled = environment.getProperty("finance.holding.reference.enabled", Boolean::class.java, false)
+        check(!holdingEnabled || environment.getProperty("server.address") in setOf("127.0.0.1", "::1")) {
+            "The holding reference requires explicit loopback server.address"
+        }
+        return FinanceTrustedContextReferenceSettings(serviceSecret, holdingEnabled)
     }
 
     @Bean
@@ -70,7 +74,7 @@ class FinanceTrustedContextConfiguration : EnvironmentAware {
     fun financeTrustedContextFilterRegistration(
         settings: FinanceTrustedContextReferenceSettings,
     ): FilterRegistrationBean<FinanceTrustedContextFilter> = FilterRegistrationBean(
-        FinanceTrustedContextFilter(settings.serviceSecret),
+        FinanceTrustedContextFilter(settings.serviceSecret, settings.holdingEnabled),
     ).apply {
         addUrlPatterns("/*")
         setDispatcherTypes(EnumSet.allOf(DispatcherType::class.java))
@@ -78,7 +82,7 @@ class FinanceTrustedContextConfiguration : EnvironmentAware {
         setName("financeTrustedContextReferenceFilter")
     }
 
-    data class FinanceTrustedContextReferenceSettings(val serviceSecret: String)
+    data class FinanceTrustedContextReferenceSettings(val serviceSecret: String, val holdingEnabled: Boolean)
 
     private fun isProductionMarker(value: String?): Boolean =
         value?.trim()?.lowercase() in setOf("prod", "production")
