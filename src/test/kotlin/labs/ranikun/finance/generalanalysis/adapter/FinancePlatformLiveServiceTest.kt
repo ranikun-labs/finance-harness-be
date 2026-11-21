@@ -6,11 +6,17 @@ import labs.ranikun.finance.identity.application.CurrentUserPort
 import labs.ranikun.finance.identity.application.IdentityUserId
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
 import java.net.URI
 
+@EnabledIfEnvironmentVariable(named = "FINANCE_SHARED_AI_TEST_URL", matches = ".+")
 class FinancePlatformLiveServiceTest {
     @Test
     fun `actual platform response passes finance adapter and output validator`() {
+        val baseUrl = URI.create(requireNotNull(System.getenv("FINANCE_SHARED_AI_TEST_URL")))
+        require(baseUrl.scheme == "http" && baseUrl.host == "127.0.0.1" && baseUrl.port in 1..65535 &&
+            baseUrl.userInfo == null && baseUrl.rawQuery == null && baseUrl.rawFragment == null &&
+            (baseUrl.rawPath.isNullOrEmpty() || baseUrl.rawPath == "/"))
         val service = GeneralAnalysisApplicationService(
             currentUserPort = object : CurrentUserPort { override fun currentUserId() = IdentityUserId("test-owner") },
             store = InMemoryGeneralAnalysisStore(),
@@ -18,7 +24,7 @@ class FinancePlatformLiveServiceTest {
             lensRouter = SafeGeneralAnalysisLensRouter(),
             executionPort = FinanceGeneralAnalysisExecutionAdapter(
                 LocalFinanceExecutionContextFactory("tenant:integration-test"),
-                FinanceSharedAiHttpClient(URI.create(requireNotNull(System.getenv("FINANCE_SHARED_AI_TEST_URL")))),
+                FinanceSharedAiHttpClient(baseUrl),
             ),
             outputValidator = FinanceGeneralAnalysisOutputValidator(),
         )
