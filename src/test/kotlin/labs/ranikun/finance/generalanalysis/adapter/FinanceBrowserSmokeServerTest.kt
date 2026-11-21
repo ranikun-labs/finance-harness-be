@@ -24,9 +24,9 @@ class FinanceBrowserSmokeServerTest {
 
     @Test
     fun `serve browser smoke until completion marker`() {
-        val ready = Path.of(requireNotNull(System.getenv("FINANCE_BROWSER_READY_FILE")))
-        val done = Path.of(requireNotNull(System.getenv("FINANCE_BROWSER_DONE_FILE")))
-        require(!Files.exists(ready) && !Files.exists(done)) { "Smoke marker paths must be fresh" }
+        val ready = Path.of(requireNotNull(System.getenv("FINANCE_BROWSER_READY_FILE"))).toAbsolutePath().normalize()
+        val done = Path.of(requireNotNull(System.getenv("FINANCE_BROWSER_DONE_FILE"))).toAbsolutePath().normalize()
+        require(ready != done && !Files.exists(ready) && !Files.exists(done)) { "Smoke marker paths must be fresh" }
         Files.writeString(ready, "http://127.0.0.1:$port")
         val deadline = System.nanoTime() + Duration.ofMinutes(8).toNanos()
         while (!Files.exists(done) && System.nanoTime() < deadline) Thread.sleep(100)
