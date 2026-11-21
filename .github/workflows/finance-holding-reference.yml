@@ -1,0 +1,29 @@
+name: Finance holding reference BE
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/finance-holding-reference.yml
+      - build.gradle.kts
+      - src/main/kotlin/labs/ranikun/finance/holding/**
+      - src/main/kotlin/labs/ranikun/finance/identity/**
+      - src/test/kotlin/financeholding/**
+
+permissions:
+  contents: read
+
+jobs:
+  reference:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Run the holding and trusted context boundary checks
+        run: ./gradlew test --tests '*HoldingReferenceTests' --tests '*FinanceTrustedContextFilterBoundaryTests'

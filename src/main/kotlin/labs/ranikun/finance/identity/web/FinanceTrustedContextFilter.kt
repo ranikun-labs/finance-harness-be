@@ -20,6 +20,7 @@ import java.util.Base64
  */
 class FinanceTrustedContextFilter(
     serviceSecret: String,
+    private val holdingReferenceEnabled: Boolean = false,
 ) : Filter {
 
     private val expectedSecret = serviceSecret.toByteArray(StandardCharsets.UTF_8)
@@ -34,7 +35,7 @@ class FinanceTrustedContextFilter(
             return
         }
 
-        if (!targetsFinanceJournal(httpRequest)) {
+        if (!targetsProtectedFinanceRoute(httpRequest)) {
             chain.doFilter(request, response)
             return
         }
@@ -69,7 +70,7 @@ class FinanceTrustedContextFilter(
 
         if (headers.getValue(HEADER_VERSION) != CONTEXT_VERSION ||
             headers.getValue(HEADER_SERVICE_ID) != SERVICE_ID ||
-            headers.getValue(HEADER_AUDIENCE) != AUDIENCE
+            headers.getValue(HEADER_AUDIENCE) != (if (path == HOLDING_PATH) HOLDING_AUDIENCE else AUDIENCE)
         ) {
             reject(httpResponse)
             return
@@ -138,9 +139,10 @@ class FinanceTrustedContextFilter(
         return subject
     }
 
-    private fun targetsFinanceJournal(request: HttpServletRequest): Boolean {
+    private fun targetsProtectedFinanceRoute(request: HttpServletRequest): Boolean {
         val rawPath = request.requestURI.removePrefix(request.contextPath)
-        return rawPath.startsWith(JOURNAL_PATH) || request.servletPath.startsWith(JOURNAL_PATH)
+        return rawPath.startsWith(JOURNAL_PATH) || request.servletPath.startsWith(JOURNAL_PATH) ||
+            holdingReferenceEnabled && (rawPath.startsWith(HOLDING_PATH) || request.servletPath.startsWith(HOLDING_PATH))
     }
 
     private fun requestPath(request: HttpServletRequest): String? {
@@ -151,6 +153,7 @@ class FinanceTrustedContextFilter(
     }
 
     private fun isSupportedRoute(method: String, path: String): Boolean = when {
+        holdingReferenceEnabled && path == HOLDING_PATH -> method == "GET" || method == "PUT"
         path == "$JOURNAL_PATH/deleted" -> method == "GET"
         (path.endsWith("/delete") || path.endsWith("/restore")) &&
             LOWERCASE_JOURNAL_ID.matches(path.substringBeforeLast('/')) -> method == "POST"
@@ -173,6 +176,7 @@ class FinanceTrustedContextFilter(
         const val CONTEXT_VERSION = "1"
         const val SERVICE_ID = "gateway-app"
         const val AUDIENCE = "finance-journal"
+        const val HOLDING_AUDIENCE = "finance-holding-reference"
 
         const val HEADER_VERSION = "X-Finance-Context-Version"
         const val HEADER_SERVICE_ID = "X-Finance-Service-Id"
@@ -180,6 +184,7 @@ class FinanceTrustedContextFilter(
         const val HEADER_AUDIENCE = "X-Finance-Audience"
         const val HEADER_SUBJECT = "X-Finance-Subject"
 
+        const val HOLDING_PATH = "/finance/holding"
         const val JOURNAL_PATH = "/finance/journals"
         const val MAX_CONTEXT_BYTES = 2048
         const val MAX_SUBJECT_BYTES = 256
