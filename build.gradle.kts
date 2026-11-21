@@ -58,3 +58,8 @@ allOpen {
 tasks.withType<Test> {
 	useJUnitPlatform()
 }
+
+tasks.register<JavaExec>("localHoldingHarness") {
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("labs.ranikun.finance.localholding.LocalHoldingHarnessKt")
+}
