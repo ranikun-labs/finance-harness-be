@@ -172,14 +172,32 @@ class GeneralAnalysisApplicationService(
                 analysis.copy(status = GeneralAnalysisStatus.FAILED, output = null)
             }
         }
-        store.saveAnalysis(analysis)
-        return analysis.toView()
+        return finishAnalysis(analysis).toView()
     }
 
+    // Use the same monitor as checklist updates in this process-local service.
+    @Synchronized
+    private fun finishAnalysis(analysis: GeneralAnalysisRecord): GeneralAnalysisRecord {
+        val current = withoutStaleOutput(analysis)
+        store.saveAnalysis(current)
+        return current
+    }
+
+    @Synchronized
     fun findAnalysis(analysisId: UUID): GeneralAnalysisView {
         val owner = currentUserPort.currentUserId()
         val analysis = store.findAnalysis(owner, analysisId) ?: throw AnalysisNotFoundException()
-        return analysis.toView()
+        return withoutStaleOutput(analysis).toView()
+    }
+
+    private fun withoutStaleOutput(analysis: GeneralAnalysisRecord): GeneralAnalysisRecord {
+        if (analysis.status != GeneralAnalysisStatus.COMPLETED) return analysis
+        val checklist = analysis.checklistId?.let { store.findChecklist(analysis.owner, it) }
+        if (
+            checklist != null && checklist.confirmed && checklist.questionId == analysis.questionId &&
+            checklist.revision == analysis.checklistRevision && checklist.checkedItemIds == analysis.checkedItemIds
+        ) return analysis
+        return analysis.copy(status = GeneralAnalysisStatus.STALE, output = null)
     }
 
     private fun isValid(candidate: GeneralAnalysisCandidate): Boolean = try {

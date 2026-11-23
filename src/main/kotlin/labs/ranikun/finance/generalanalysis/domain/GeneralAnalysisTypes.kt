@@ -28,6 +28,7 @@ enum class GeneralAnalysisStatus {
     REQUESTED,
     RUNNING,
     COMPLETED,
+    STALE,
     FAILED,
     BLOCKED,
 }

@@ -14,6 +14,9 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class GeneralAnalysisApplicationServiceTests {
 
@@ -34,6 +37,59 @@ class GeneralAnalysisApplicationServiceTests {
             GeneralAnalysisStatus.RUNNING,
             GeneralAnalysisStatus.COMPLETED,
         )
+    }
+
+    @Test
+    fun checklistChangedDuringExecutionPreventsCompletionAndLookupOutput() {
+        val setup = Harness()
+        val question = setup.service.createQuestion("What facts should I verify?")
+        setup.service.confirmChecklist(question.questionId, question.checklistId, setOf("known_facts"), true)
+        val executionStarted = CountDownLatch(1)
+        val allowResponse = CountDownLatch(1)
+        setup.execution.beforeResponse = {
+            executionStarted.countDown()
+            check(allowResponse.await(5, TimeUnit.SECONDS))
+        }
+        val worker = Executors.newSingleThreadExecutor()
+        try {
+            val pending = worker.submit<GeneralAnalysisView> {
+                setup.service.analyze(question.questionId, question.checklistId)
+            }
+            check(executionStarted.await(5, TimeUnit.SECONDS))
+            val analysisId = setup.execution.inputs.single().analysisRequestId
+            setup.service.confirmChecklist(question.questionId, question.checklistId, setOf("assumptions"), true)
+            allowResponse.countDown()
+
+            val stale = pending.get(5, TimeUnit.SECONDS)
+            assertThat(stale.status).isEqualTo(GeneralAnalysisStatus.STALE)
+            assertThat(stale.output).isNull()
+            assertThat(setup.store.savedAnalyses.last().status).isEqualTo(GeneralAnalysisStatus.STALE)
+            assertThat(setup.service.findAnalysis(analysisId)).isEqualTo(stale)
+
+            val current = setup.service.analyze(question.questionId, question.checklistId)
+            assertThat(current.status).isEqualTo(GeneralAnalysisStatus.COMPLETED)
+            assertThat(current.output).isNotNull
+        } finally {
+            allowResponse.countDown()
+            worker.shutdownNow()
+        }
+    }
+
+    @Test
+    fun revokingConfirmationHidesAnAlreadyCompletedResultEvenAfterReconfirmation() {
+        val setup = Harness()
+        val question = setup.service.createQuestion("What facts should I verify?")
+        setup.service.confirmChecklist(question.questionId, question.checklistId, setOf("known_facts"), true)
+        val completed = setup.service.analyze(question.questionId, question.checklistId)
+        assertThat(setup.service.findAnalysis(completed.analysisId)).isEqualTo(completed)
+
+        setup.service.confirmChecklist(question.questionId, question.checklistId, setOf("known_facts"), false)
+        val stale = setup.service.findAnalysis(completed.analysisId)
+        assertThat(stale.status).isEqualTo(GeneralAnalysisStatus.STALE)
+        assertThat(stale.output).isNull()
+
+        setup.service.confirmChecklist(question.questionId, question.checklistId, setOf("known_facts"), true)
+        assertThat(setup.service.findAnalysis(completed.analysisId)).isEqualTo(stale)
     }
 
     @Test
@@ -609,6 +665,7 @@ class GeneralAnalysisApplicationServiceTests {
 
     private class RecordingExecutionPort(private val order: MutableList<String>) : GeneralAnalysisExecutionPort {
         val inputs = mutableListOf<GeneralAnalysisExecutionInput>()
+        var beforeResponse: () -> Unit = {}
         var result: GeneralAnalysisExecutionResult = GeneralAnalysisExecutionResult.Success(
             GeneralAnalysisCandidate(
                 summary = "The question has been received for general analysis.",
@@ -622,6 +679,7 @@ class GeneralAnalysisApplicationServiceTests {
         override fun execute(input: GeneralAnalysisExecutionInput): GeneralAnalysisExecutionResult {
             order += "execution"
             inputs += input
+            beforeResponse()
             return result
         }
     }
