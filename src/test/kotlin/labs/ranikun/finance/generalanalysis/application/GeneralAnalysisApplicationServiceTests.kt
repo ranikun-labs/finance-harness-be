@@ -95,6 +95,10 @@ class GeneralAnalysisApplicationServiceTests {
         assertThat(result.output).isNull()
         assertThat(setup.execution.inputs).isEmpty()
         assertThat(setup.order).doesNotContain("execution", "validation")
+        assertThat(setup.store.savedAnalyses.map { it.status }).containsExactly(
+            GeneralAnalysisStatus.REQUESTED,
+            GeneralAnalysisStatus.STALE,
+        )
         assertThat(setup.service.findAnalysis(result.analysisId)).isEqualTo(result)
     }
 
