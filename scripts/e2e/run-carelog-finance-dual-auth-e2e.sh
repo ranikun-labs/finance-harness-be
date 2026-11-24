@@ -183,6 +183,15 @@ stub_pid=$!
 cleanup() {
   local status=$?
   trap - EXIT INT TERM
+  # On failure, surface only the ERROR/WARN lines of Core and Gateway (secrets are already ::add-mask::ed).
+  if [[ "$status" -ne 0 ]]; then
+    for log in "$log_dir/core.log" "$log_dir/gateway.log"; do
+      if [[ -f "$log" ]]; then
+        echo "--- ${log##*/}: last ERROR/WARN lines"
+        grep -E ' (ERROR|WARN) ' "$log" | tail -n 40 || true
+      fi
+    done
+  fi
   for pid in "${gateway_pid:-}" "${finance_pid:-}" "${core_pid:-}" "${stub_pid:-}"; do
     if [[ -n "$pid" ]]; then kill "$pid" 2>/dev/null || true; fi
   done

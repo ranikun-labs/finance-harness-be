@@ -38,7 +38,12 @@ async function send(method, url, { headers = {}, body } = {}) {
 
 function expectStatus(result, expected, label) {
   if (result.status !== expected) {
-    stage = `${label} HTTP ${result.status}`;
+    // Server error messages are fixed Core/Gateway strings; they tell a Gateway fail-closed 503 (no body)
+    // apart from a Core 503 such as "Registration pending" or "Registration unavailable".
+    const message = typeof result.json?.message === 'string' && result.json.message.length <= 120
+      ? ` message="${result.json.message}"`
+      : '';
+    stage = `${label} HTTP ${result.status}${message}`;
     assert.fail(`${label}: expected ${expected}, got ${result.status}`);
   }
   stage = label;
