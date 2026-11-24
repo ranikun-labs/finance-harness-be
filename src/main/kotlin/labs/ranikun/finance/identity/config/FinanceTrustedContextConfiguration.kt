@@ -14,11 +14,13 @@ import org.springframework.core.env.Environment
 import java.util.EnumSet
 
 /**
- * Explicit non-production registration. The candidate's production TLS, credential
- * lifecycle, and risk gates remain outside this fixture profile.
+ * Explicit non-production registration for the trusted-context receiver. Active only under the
+ * `finance-trusted-context-reference` fixture profile or the `dev` profile. The caller value must
+ * be supplied explicitly (fixture properties or FINANCE_TRUSTED_CONTEXT_SERVICE_SECRET); there is
+ * no default. Production TLS, credential lifecycle, and risk gates remain outside this profile.
  */
 @Configuration(proxyBeanMethods = false)
-@Profile("finance-trusted-context-reference")
+@Profile("finance-trusted-context-reference | dev")
 class FinanceTrustedContextConfiguration : EnvironmentAware {
 
     private lateinit var environment: Environment

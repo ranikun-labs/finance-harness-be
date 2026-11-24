@@ -15,8 +15,8 @@ import java.security.MessageDigest
 import java.util.Base64
 
 /**
- * Reference-only verifier for the bounded Gateway to Finance D1 contract.
- * Registration is deliberately restricted to the explicit fixture profile.
+ * Verifier for the bounded Gateway to Finance trusted-context contract. Registration is restricted
+ * to the explicit fixture and dev profiles (see FinanceTrustedContextConfiguration).
  */
 class FinanceTrustedContextFilter(
     serviceSecret: String,
@@ -138,9 +138,15 @@ class FinanceTrustedContextFilter(
         return subject
     }
 
+    /**
+     * Deny-by-default for the whole Finance surface: every /finance path requires the trusted
+     * envelope, and only the supported journal routes pass it. Other Finance routes (for example
+     * general-analysis) therefore fail closed with 403 instead of reaching a controller without identity.
+     */
     private fun targetsFinanceJournal(request: HttpServletRequest): Boolean {
         val rawPath = request.requestURI.removePrefix(request.contextPath)
-        return rawPath.startsWith(JOURNAL_PATH) || request.servletPath.startsWith(JOURNAL_PATH)
+        return rawPath == FINANCE_PREFIX || rawPath.startsWith("$FINANCE_PREFIX/") ||
+            request.servletPath == FINANCE_PREFIX || request.servletPath.startsWith("$FINANCE_PREFIX/")
     }
 
     private fun requestPath(request: HttpServletRequest): String? {
@@ -180,6 +186,7 @@ class FinanceTrustedContextFilter(
         const val HEADER_AUDIENCE = "X-Finance-Audience"
         const val HEADER_SUBJECT = "X-Finance-Subject"
 
+        const val FINANCE_PREFIX = "/finance"
         const val JOURNAL_PATH = "/finance/journals"
         const val MAX_CONTEXT_BYTES = 2048
         const val MAX_SUBJECT_BYTES = 256

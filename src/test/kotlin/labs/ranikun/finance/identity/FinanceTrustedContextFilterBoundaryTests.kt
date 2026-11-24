@@ -76,6 +76,31 @@ class FinanceTrustedContextFilterBoundaryTests {
         }
     }
 
+    @Test
+    fun generalAnalysisAndOtherFinanceRoutesFailClosedEvenWithTrustedEnvelope() {
+        val filter = FinanceTrustedContextFilter(publicFixtureSecret())
+        listOf(
+            "POST" to "/finance/general-analysis/questions",
+            "GET" to "/finance/general-analysis/analyses/00000000-0000-0000-0000-000000000000",
+            "GET" to "/finance/journals/00000000-0000-0000-0000-000000000000/unknown",
+        ).forEach { (method, path) ->
+            listOf(
+                MockHttpServletRequest(method, path),
+                MockHttpServletRequest(method, path).also { request ->
+                    headers("owner-a").forEach { (name, value) -> request.addHeader(name, value) }
+                },
+            ).forEach { request ->
+                val response = MockHttpServletResponse()
+                var chainCalled = false
+                filter.doFilter(request, response, FilterChain { _: ServletRequest, _: ServletResponse ->
+                    chainCalled = true
+                })
+                assertThat(response.status).isEqualTo(403)
+                assertThat(chainCalled).isFalse()
+            }
+        }
+    }
+
     private fun request(subject: String): MockHttpServletRequest {
         val request = MockHttpServletRequest("GET", FinanceTrustedContextFilter.JOURNAL_PATH)
         headers(subject).forEach { (name, value) -> request.addHeader(name, value) }

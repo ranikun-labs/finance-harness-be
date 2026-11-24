@@ -103,6 +103,35 @@ class FinanceTrustedContextConfigurationTests {
         }
     }
 
+    @Test
+    fun devProfileRegistersReceiverOnlyWithExplicitCallerValue() {
+        runner.withPropertyValues(
+            "spring.profiles.active=dev",
+            "finance.auth.mode=trusted-context",
+            "finance.auth.trusted-context.service-secret=$PUBLIC_DUMMY_SECRET",
+        ).run { context ->
+            assertThat(context).hasNotFailed()
+            assertThat(context).hasSingleBean(TrustedContextCurrentUserAdapter::class.java)
+            assertThat(context).hasSingleBean(FilterRegistrationBean::class.java)
+        }
+        listOf(
+            arrayOf("spring.profiles.active=dev", "finance.auth.mode=trusted-context"),
+            arrayOf("spring.profiles.active=dev", "finance.auth.mode=trusted-context",
+                "finance.auth.trusted-context.service-secret=too-short"),
+            arrayOf("spring.profiles.active=dev,production", "finance.auth.mode=trusted-context",
+                "finance.auth.trusted-context.service-secret=$PUBLIC_DUMMY_SECRET"),
+            arrayOf("spring.profiles.active=dev", "finance.auth.mode=trusted-context",
+                "finance.auth.trusted-context.service-secret=$PUBLIC_DUMMY_SECRET",
+                "FINANCE_METRICS_ENVIRONMENT=production"),
+            arrayOf("spring.profiles.active=dev,local", "finance.auth.mode=trusted-context",
+                "finance.auth.trusted-context.service-secret=$PUBLIC_DUMMY_SECRET"),
+        ).forEach { properties ->
+            runner.withPropertyValues(*properties).run { context ->
+                assertThat(context).hasFailed()
+            }
+        }
+    }
+
     companion object {
         private const val PUBLIC_DUMMY_SECRET =
             "Finance-D1-Reference-Public-Dummy-Secret-Do-Not-Use-In-Production-2026"

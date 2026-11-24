@@ -59,6 +59,8 @@ Flyway is the schema source of truth. `V1__create_journal_schema.sql` owns `jour
 
 `occurredAt` is a strict local wall-clock value paired with a registered IANA `timeZone`. DST gaps and overlaps are rejected, while the resolved instant, original local value, and original zone are persisted together. Study `openQuestions` is required, accepts an empty list, preserves order and duplicates, and is limited to 10 items of 500 characters each.
 
+For DEV with the Gateway trusted-context envelope, activate the `dev` profile and provide `FINANCE_TRUSTED_CONTEXT_SERVICE_SECRET` (at least 32 printable ASCII characters, never committed); see `docs/contracts/finance-trusted-context-v1.md`.
+
 For local development, activate the `local` profile and provide `FINANCE_LOCAL_IDENTITY_USER_ID`. The local adapter is available only when an active profile is `local` or `test`, no active profile is `production`, and `finance.auth.mode=local`; it is not a production authentication integration or fallback.
 
 ## Scope boundaries
