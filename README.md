@@ -36,7 +36,8 @@ Runtime database settings are environment-backed:
 | `SPRING_PROFILES_ACTIVE` | Optional active profile value used in structured log service metadata |
 | `FINANCE_MANAGEMENT_PORT` | Private Actuator listener port; defaults to `8081` and is not published by Compose |
 | `FINANCE_MANAGEMENT_BIND_ADDRESS` | Defaults to loopback; Compose binds inside the container for private Alloy access |
-| `FINANCE_METRICS_ENVIRONMENT` | Bounded environment label; Compose fixes this to `production` |
+| `FINANCE_METRICS_ENVIRONMENT` | Bounded environment label; Compose defaults to `production` and must be overridden (e.g. `dev`) for DEV runs |
+| `FINANCE_TRUSTED_CONTEXT_SERVICE_SECRET` | DEV `dev` profile only: trusted-context caller value (32+ printable ASCII). Empty by default; never commit |
 
 No database secret, token, cookie, trusted auth header, or financial request body is logged by this foundation.
 
