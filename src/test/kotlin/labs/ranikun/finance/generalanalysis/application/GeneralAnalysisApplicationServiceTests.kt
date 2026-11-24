@@ -76,6 +76,29 @@ class GeneralAnalysisApplicationServiceTests {
     }
 
     @Test
+    fun checklistChangedBeforeExecutionStartsMakesNoModelCall() {
+        lateinit var change: () -> Unit
+        val setup = Harness(object : GeneralAnalysisPolicyGuard {
+            override fun classify(question: String): PolicyClassification {
+                // revision 확인 통과 후, 실행 시작 확정 전에 다른 요청이 체크리스트를 바꾼다.
+                change()
+                return PolicyClassification.SAFE_GENERAL
+            }
+        })
+        val question = setup.service.createQuestion("What facts should I verify?")
+        val confirmed = setup.service.confirmChecklist(question.questionId, question.checklistId, setOf("known_facts"), true)
+        change = { setup.service.confirmChecklist(question.questionId, question.checklistId, setOf("assumptions"), true) }
+
+        val result = setup.service.analyze(question.questionId, question.checklistId, confirmed.revision)
+
+        assertThat(result.status).isEqualTo(GeneralAnalysisStatus.STALE)
+        assertThat(result.output).isNull()
+        assertThat(setup.execution.inputs).isEmpty()
+        assertThat(setup.order).doesNotContain("execution", "validation")
+        assertThat(setup.service.findAnalysis(result.analysisId)).isEqualTo(result)
+    }
+
+    @Test
     fun revokingConfirmationHidesAnAlreadyCompletedResultEvenAfterReconfirmation() {
         val setup = Harness()
         val question = setup.service.createQuestion("What facts should I verify?")

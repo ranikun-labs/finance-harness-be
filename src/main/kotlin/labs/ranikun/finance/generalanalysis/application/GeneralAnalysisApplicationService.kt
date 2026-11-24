@@ -140,8 +140,9 @@ class GeneralAnalysisApplicationService(
             store.saveAnalysis(analysis)
             return analysis.toView()
         }
-        analysis = analysis.copy(status = GeneralAnalysisStatus.RUNNING)
-        store.saveAnalysis(analysis)
+        // 시작 확정: 체크리스트 변경과 같은 monitor에서 재확인하고, 바뀌었으면 모델을 호출하지 않는다.
+        analysis = startExecution(analysis)
+        if (analysis.status != GeneralAnalysisStatus.RUNNING) return analysis.toView()
 
         val executionResult = try {
             executionPort.execute(
@@ -186,6 +187,17 @@ class GeneralAnalysisApplicationService(
     }
 
     @Synchronized
+    private fun startExecution(analysis: GeneralAnalysisRecord): GeneralAnalysisRecord {
+        val next = if (matchesCurrentChecklist(analysis)) {
+            analysis.copy(status = GeneralAnalysisStatus.RUNNING)
+        } else {
+            analysis.copy(status = GeneralAnalysisStatus.STALE, output = null)
+        }
+        store.saveAnalysis(next)
+        return next
+    }
+
+    @Synchronized
     fun findAnalysis(analysisId: UUID): GeneralAnalysisView {
         val owner = currentUserPort.currentUserId()
         val analysis = store.findAnalysis(owner, analysisId) ?: throw AnalysisNotFoundException()
@@ -194,12 +206,14 @@ class GeneralAnalysisApplicationService(
 
     private fun withoutStaleOutput(analysis: GeneralAnalysisRecord): GeneralAnalysisRecord {
         if (analysis.status != GeneralAnalysisStatus.COMPLETED) return analysis
-        val checklist = analysis.checklistId?.let { store.findChecklist(analysis.owner, it) }
-        if (
-            checklist != null && checklist.confirmed && checklist.questionId == analysis.questionId &&
-            checklist.revision == analysis.checklistRevision && checklist.checkedItemIds == analysis.checkedItemIds
-        ) return analysis
+        if (matchesCurrentChecklist(analysis)) return analysis
         return analysis.copy(status = GeneralAnalysisStatus.STALE, output = null)
+    }
+
+    private fun matchesCurrentChecklist(analysis: GeneralAnalysisRecord): Boolean {
+        val checklist = analysis.checklistId?.let { store.findChecklist(analysis.owner, it) }
+        return checklist != null && checklist.confirmed && checklist.questionId == analysis.questionId &&
+            checklist.revision == analysis.checklistRevision && checklist.checkedItemIds == analysis.checkedItemIds
     }
 
     private fun isValid(candidate: GeneralAnalysisCandidate): Boolean = try {
