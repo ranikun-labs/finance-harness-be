@@ -19,6 +19,9 @@ import labs.ranikun.finance.identity.application.IdentityUserId
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.json.JsonMapper
 import tools.jackson.databind.node.ObjectNode
@@ -341,6 +344,70 @@ class FinanceSharedAiHttpClientTests {
             assertThat(rejected.output).isNull()
             assertThat(service.findAnalysis(rejected.analysisId).output).isNull()
             assertThat(requestCount.get()).isEqualTo(2)
+        }
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension::class)
+    fun `logs one safe diagnostic per failed analysis and none for success`(output: CapturedOutput) {
+        val cases = listOf(
+            "HTTP_TIMEOUT",
+            "RESPONSE_INVALID",
+            "EVIDENCE_INVALID",
+            "INTERPRETATION_INVALID",
+            "OUTPUT_REJECTED",
+            null,
+        )
+        for (expectedCode in cases) {
+            val requests = AtomicInteger()
+            LocalJsonServer { exchange ->
+                requests.incrementAndGet()
+                val context = requestContextFromWire(mapper.readTree(exchange.readBody()))
+                if (expectedCode == "HTTP_TIMEOUT") {
+                    // Send no headers so the HTTP client, rather than the fixture, ends the request.
+                    Thread.sleep(1_000)
+                    exchange.close()
+                } else {
+                    val body = when (expectedCode) {
+                        "RESPONSE_INVALID" -> "synthetic invalid response detail"
+                        "EVIDENCE_INVALID" -> successResponse(context.copy(requestReference = "different-request"))
+                        "INTERPRETATION_INVALID" -> successResponse(context, interpretation = "synthetic invalid answer detail")
+                        "OUTPUT_REJECTED" -> successResponse(context, interpretation = candidateJson(summary = "Price target is 120; buy now."))
+                        else -> successResponse(context)
+                    }
+                    exchange.respond(200, body)
+                }
+            }.use { server ->
+                val client = if (expectedCode == "HTTP_TIMEOUT") {
+                    FinanceSharedAiHttpClient(server.baseUrl, totalTimeout = Duration.ofMillis(300))
+                } else {
+                    FinanceSharedAiHttpClient(server.baseUrl)
+                }
+                val service = service(FinanceGeneralAnalysisExecutionAdapter(
+                    LocalFinanceExecutionContextFactory("tenant:diagnostics-test"),
+                    client,
+                ))
+                val question = service.createQuestion("How can I verify this synthetic diagnostic fixture?")
+                service.confirmChecklist(question.questionId, question.checklistId, setOf("known_facts"), true)
+
+                val result = service.analyze(question.questionId, question.checklistId)
+
+                val diagnostics = output.all.lineSequence()
+                    .filter { it.contains("analysisRequestId=${result.analysisId} ") }
+                    .map { it.substringAfter("analysisRequestId=").substringBefore('"') }
+                    .toList()
+                assertThat(requests.get()).isEqualTo(1)
+                if (expectedCode == null) {
+                    assertThat(result.status).isEqualTo(GeneralAnalysisStatus.COMPLETED)
+                    assertThat(result.output).isNotNull()
+                    assertThat(diagnostics).isEmpty()
+                } else {
+                    assertThat(result.status).isEqualTo(GeneralAnalysisStatus.FAILED)
+                    assertThat(result.output).isNull()
+                    assertThat(diagnostics).hasSize(1)
+                    assertThat(diagnostics.single()).matches("${result.analysisId} elapsedMs=[0-9]+ failureCode=$expectedCode")
+                }
+            }
         }
     }
 

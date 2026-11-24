@@ -144,6 +144,7 @@ class GeneralAnalysisApplicationService(
         analysis = startExecution(analysis)
         if (analysis.status != GeneralAnalysisStatus.RUNNING) return analysis.toView()
 
+        val startedAtNanos = System.nanoTime()
         val executionResult = try {
             executionPort.execute(
                 GeneralAnalysisExecutionInput(
@@ -172,6 +173,7 @@ class GeneralAnalysisApplicationService(
                     output = executionResult.candidate,
                 )
             } else {
+                GeneralAnalysisFailureCode.OUTPUT_REJECTED.log(analysis.id, startedAtNanos)
                 analysis.copy(status = GeneralAnalysisStatus.FAILED, output = null)
             }
         }

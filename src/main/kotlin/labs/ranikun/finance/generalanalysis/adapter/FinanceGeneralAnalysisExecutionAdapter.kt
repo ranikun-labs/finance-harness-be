@@ -9,9 +9,11 @@ import labs.ranikun.finance.generalanalysis.application.FinanceSharedAiOutcome
 import labs.ranikun.finance.generalanalysis.application.FinanceSharedAiPort
 import labs.ranikun.finance.generalanalysis.application.FinanceSharedAiRequest
 import labs.ranikun.finance.generalanalysis.application.FinanceSharedAiRequestContext
+import labs.ranikun.finance.generalanalysis.application.FinanceSharedAiTransportFailure
 import labs.ranikun.finance.generalanalysis.application.GeneralAnalysisExecutionInput
 import labs.ranikun.finance.generalanalysis.application.GeneralAnalysisExecutionPort
 import labs.ranikun.finance.generalanalysis.application.GeneralAnalysisExecutionResult
+import labs.ranikun.finance.generalanalysis.application.GeneralAnalysisFailureCode
 import labs.ranikun.finance.generalanalysis.application.GeneralAnalysisLens
 import labs.ranikun.finance.generalanalysis.domain.GeneralAnalysisCandidate
 import tools.jackson.core.StreamReadFeature
@@ -78,6 +80,7 @@ class FinanceGeneralAnalysisExecutionAdapter(
                 return GeneralAnalysisExecutionResult.TechnicalFailure
             },
         )
+        val startedAtNanos = System.nanoTime()
         val outcome = try {
             sharedAiPort.execute(request)
         } catch (_: Exception) {
@@ -85,17 +88,29 @@ class FinanceGeneralAnalysisExecutionAdapter(
         }
 
         return when (outcome) {
-            is FinanceSharedAiOutcome.TechnicalFailure,
-            is FinanceSharedAiOutcome.TransportFailure -> GeneralAnalysisExecutionResult.TechnicalFailure
+            is FinanceSharedAiOutcome.TechnicalFailure -> GeneralAnalysisExecutionResult.TechnicalFailure
+            is FinanceSharedAiOutcome.TransportFailure -> {
+                val code = when (outcome.category) {
+                    FinanceSharedAiTransportFailure.TIMEOUT -> GeneralAnalysisFailureCode.HTTP_TIMEOUT
+                    FinanceSharedAiTransportFailure.MALFORMED_RESPONSE,
+                    FinanceSharedAiTransportFailure.RESPONSE_TOO_LARGE -> GeneralAnalysisFailureCode.RESPONSE_INVALID
+                    else -> null
+                }
+                code?.log(input.analysisRequestId, startedAtNanos)
+                GeneralAnalysisExecutionResult.TechnicalFailure
+            }
 
             is FinanceSharedAiOutcome.Success -> {
                 if (!isValidResult(context, outcome.evidence, outcome.executionReference)) {
-                    GeneralAnalysisExecutionResult.TechnicalFailure
-                } else {
-                    val candidate = interpretationParser.parse(outcome.interpretation)
-                        ?: return GeneralAnalysisExecutionResult.TechnicalFailure
-                    GeneralAnalysisExecutionResult.Success(candidate)
+                    GeneralAnalysisFailureCode.EVIDENCE_INVALID.log(input.analysisRequestId, startedAtNanos)
+                    return GeneralAnalysisExecutionResult.TechnicalFailure
                 }
+                val candidate = interpretationParser.parse(outcome.interpretation)
+                if (candidate == null) {
+                    GeneralAnalysisFailureCode.INTERPRETATION_INVALID.log(input.analysisRequestId, startedAtNanos)
+                    return GeneralAnalysisExecutionResult.TechnicalFailure
+                }
+                GeneralAnalysisExecutionResult.Success(candidate)
             }
         }
     }
