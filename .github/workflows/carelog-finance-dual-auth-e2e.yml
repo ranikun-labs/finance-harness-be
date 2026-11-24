@@ -1,0 +1,158 @@
+name: Carelog x Finance dual-auth E2E
+
+on:
+  push:
+    branches: [claude/great-heisenberg-u3i75y]
+    paths:
+      - .github/workflows/carelog-finance-dual-auth-e2e.yml
+      - scripts/e2e/run-carelog-finance-dual-auth-e2e.sh
+      - scripts/e2e/carelog-finance-dual-auth-e2e.mjs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Pins. The candidate commit must be exactly one commit above FINANCE_EXPECTED_SHA and add only the
+# three files in the paths filter above. PLATFORM_SERVICES_* stay placeholders until Main fills them
+# with the verified platform-services commit and its git tree; the job fails closed until then.
+# CARELOG_ENROLLMENT_TARGET=stub: Carelog enrollment/claims are answered by an embedded synthetic stub,
+# not by carelog-be. Real carelog-be registration/enrollment is NOT verified by this job.
+env:
+  FINANCE_EXPECTED_SHA: 31c4307b0c63ee62d70eec56eefd56d9960b6fa1
+  PLATFORM_SERVICES_SHA: f9adfd3d338f482e7c2967512522e5b4e2354619
+  PLATFORM_SERVICES_TREE: dbbd2b215e9a2de4e43067d1ad699db6665bbde6
+  CARELOG_ENROLLMENT_TARGET: stub
+
+concurrency:
+  group: carelog-finance-dual-auth-e2e-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  dual-auth-e2e:
+    if: github.repository == 'ranikun-labs/finance-harness-be'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:18.4-alpine3.24
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: postgres
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+      valkey:
+        image: valkey/valkey:9.1.2-alpine@sha256:48332870af354a799964c0012ae1194a0bf2bf894eb508f945810596dc2d8d11
+        ports:
+          - 127.0.0.1:6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    steps:
+      - name: Check out candidate with parent history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Record Carelog enrollment disclosure
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Runs first so the disclosure is recorded even when a later pin check fails closed.
+          test "$CARELOG_ENROLLMENT_TARGET" = "stub"
+          {
+            echo '## Carelog enrollment'
+            echo '- Target: `CARELOG_ENROLLMENT_TARGET=stub`. Enrollment PUT and product-claims GET are answered by an embedded synthetic stub, not by carelog-be.'
+            echo '- Verified here: Core calls the stub, and the verifier asserts the stub received exactly one enrollment.'
+            echo '- Not covered: real carelog-be registration/enrollment — tracked separately'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify Finance candidate pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^)" = "$FINANCE_EXPECTED_SHA"
+          # Only additions: no existing file may be modified, renamed or deleted by this candidate.
+          test -z "$(git diff --name-status HEAD^ HEAD | awk '$1 != "A"')"
+          expected="$(printf '%s\n' \
+            .github/workflows/carelog-finance-dual-auth-e2e.yml \
+            scripts/e2e/carelog-finance-dual-auth-e2e.mjs \
+            scripts/e2e/run-carelog-finance-dual-auth-e2e.sh | sort)"
+          actual="$(git diff --name-only --no-renames HEAD^ HEAD | sort)"
+          test "$actual" = "$expected"
+          finance_tree="$(git rev-parse 'HEAD^{tree}')"
+          printf 'finance_candidate_sha=%s\nfinance_candidate_tree=%s\nfinance_base_sha=%s\n' \
+            "$GITHUB_SHA" "$finance_tree" "$FINANCE_EXPECTED_SHA" >> "$GITHUB_ENV"
+
+      - name: Verify platform-services placeholder is filled
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Fail-closed by design: this candidate cannot run until Main replaces both placeholders in the
+          # env block above with a verified platform-services commit SHA and its tree SHA (40 lowercase hex).
+          [[ "$PLATFORM_SERVICES_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "FAIL-CLOSED: PLATFORM_SERVICES_SHA is '$PLATFORM_SERVICES_SHA' (placeholder, not a 40-hex commit SHA)."
+            echo "Main must pin the verified platform-services commit in the workflow env block. Not a Finance code failure."
+            exit 1
+          }
+          [[ "$PLATFORM_SERVICES_TREE" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "FAIL-CLOSED: PLATFORM_SERVICES_TREE is '$PLATFORM_SERVICES_TREE' (placeholder, not a 40-hex tree SHA)."
+            echo "Main must pin the verified platform-services git tree in the workflow env block. Not a Finance code failure."
+            exit 1
+          }
+
+      - name: Download and verify pinned platform-services source
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/platform-services.zip"
+          unpack="$RUNNER_TEMP/platform-services"
+          curl --fail --silent --show-error --location \
+            "https://codeload.github.com/ranikun-labs/platform-services/zip/$PLATFORM_SERVICES_SHA" \
+            -o "$archive"
+          mkdir -p "$unpack"
+          unzip -q "$archive" -d "$unpack"
+          platform_dir="$(find "$unpack" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+          test -n "$platform_dir"
+          chmod +x "$platform_dir/gradlew"
+          git -C "$platform_dir" init -q
+          git -C "$platform_dir" add -f -A
+          platform_tree="$(git -C "$platform_dir" write-tree)"
+          test "$platform_tree" = "$PLATFORM_SERVICES_TREE"
+          echo "PLATFORM_SOURCE_DIR=$platform_dir" >> "$GITHUB_ENV"
+
+      - name: Record pinned sources in job summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo '### Pinned sources'
+            echo "- Finance candidate: \`$finance_candidate_sha\` (tree \`$finance_candidate_tree\`)"
+            echo "- Finance base (HEAD^): \`$finance_base_sha\`"
+            echo "- Platform-services: \`$PLATFORM_SERVICES_SHA\` (tree \`$PLATFORM_SERVICES_TREE\`)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # setup-java exports JAVA_HOME_17_X64 (Gateway) and JAVA_HOME_21_X64 (Core, Finance); the run script requires both.
+      - name: Set up JDK 17 (Gateway) and JDK 21 (Core, Finance)
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: |
+            17
+            21
+
+      - name: Run Carelog x Finance dual-auth flows
+        shell: bash
+        run: >-
+          ./scripts/e2e/run-carelog-finance-dual-auth-e2e.sh
+          "$GITHUB_WORKSPACE"
+          "$PLATFORM_SOURCE_DIR"
