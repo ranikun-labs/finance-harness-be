@@ -98,6 +98,7 @@ stub_script="$log_dir/carelog-enrollment-stub.py"
 cat >"$stub_script" <<'PY'
 import json
 import os
+import sys
 import threading
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -120,6 +121,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send(self, status, body=None):
         encoded = b"" if body is None else json.dumps(body).encode("utf-8")
+        if status >= 300:
+            # One line per non-2xx: method, status and reason phrase only (never request or response values).
+            reason = BaseHTTPRequestHandler.responses.get(status, ("",))[0]
+            print(f"carelog-stub: {self.command} {status} {reason}", file=sys.stderr, flush=True)
         self.send_response(status)
         if body is not None:
             self.send_header("Content-Type", "application/json")
@@ -150,11 +155,29 @@ class Handler(BaseHTTPRequestHandler):
             })
         return self._send(404, {"error": "not_found"})
 
+    def _read_body(self):
+        # Core's JDK HttpClient streams the enrollment body, so it arrives chunked with no Content-Length.
+        if "chunked" in self.headers.get("Transfer-Encoding", "").lower():
+            chunks = []
+            while True:
+                size_line = self.rfile.readline(65537)
+                size = int(size_line.split(b";", 1)[0].strip(), 16)
+                if size == 0:
+                    while self.rfile.readline(65537) not in (b"\r\n", b"\n", b""):
+                        pass
+                    return b"".join(chunks)
+                chunks.append(self.rfile.read(size))
+                self.rfile.readline(65537)  # CRLF that terminates each chunk's data
+        length = int(self.headers.get("Content-Length", "0"))
+        return self.rfile.read(length)
+
     def do_PUT(self):
         if not self.path.startswith(ENROLL_PREFIX):
             return self._send(404, {"error": "not_found"})
-        length = int(self.headers.get("Content-Length", "0"))
-        raw = self.rfile.read(length)
+        try:
+            raw = self._read_body()
+        except ValueError:
+            return self._send(400, {"error": "invalid_framing"})
         if self.headers.get("Authorization") != ENROLL_BEARER:
             return self._send(403)
         account = self.path[len(ENROLL_PREFIX):]
@@ -191,6 +214,10 @@ cleanup() {
         grep -E ' (ERROR|WARN) ' "$log" | tail -n 40 || true
       fi
     done
+    if [[ -f "$log_dir/carelog-stub.log" ]]; then
+      echo "--- carelog-stub.log: non-2xx lines (status and reason only)"
+      tail -n 40 "$log_dir/carelog-stub.log" || true
+    fi
   fi
   for pid in "${gateway_pid:-}" "${finance_pid:-}" "${core_pid:-}" "${stub_pid:-}"; do
     if [[ -n "$pid" ]]; then kill "$pid" 2>/dev/null || true; fi
