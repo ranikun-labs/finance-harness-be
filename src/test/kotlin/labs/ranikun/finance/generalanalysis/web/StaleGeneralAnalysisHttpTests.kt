@@ -66,10 +66,12 @@ class StaleGeneralAnalysisHttpTests {
         val questionPath = "/questions/${setup.path("questionId").stringValue()}"
         val checklistId = setup.path("checklistId").stringValue()
         val checklistPath = "$questionPath/checklists/$checklistId"
-        val startRequest = request("POST", "$questionPath/analysis", """{"checklistId":"$checklistId"}""")
+        fun startRequest(revision: Int) = request(
+            "POST", "$questionPath/analysis", """{"checklistId":"$checklistId","expectedRevision":$revision}""",
+        )
 
         update(firstTab, checklistPath, "known_facts")
-        val pending = firstTab.sendAsync(startRequest, HttpResponse.BodyHandlers.ofString())
+        val pending = firstTab.sendAsync(startRequest(1), HttpResponse.BodyHandlers.ofString())
         try {
             assertThat(execution.started.await(5, TimeUnit.SECONDS)).isTrue()
             update(secondTab, checklistPath, "assumptions")
@@ -82,7 +84,18 @@ class StaleGeneralAnalysisHttpTests {
         assertThat(stale.path("output").isNull).isTrue()
         assertThat(lookup(secondTab, stale)).isEqualTo(stale)
 
-        val completed = body(firstTab.send(startRequest, HttpResponse.BodyHandlers.ofString()), 200)
+        val missingRevision = firstTab.send(
+            request("POST", "$questionPath/analysis", """{"checklistId":"$checklistId"}"""),
+            HttpResponse.BodyHandlers.ofString(),
+        )
+        assertThat(missingRevision.statusCode()).isEqualTo(400)
+
+        val staleStart = firstTab.send(startRequest(1), HttpResponse.BodyHandlers.ofString())
+        assertThat(staleStart.statusCode()).isEqualTo(409)
+        assertThat(execution.calls.get()).isEqualTo(1)
+
+        val completed = body(firstTab.send(startRequest(2), HttpResponse.BodyHandlers.ofString()), 200)
+        assertThat(execution.calls.get()).isEqualTo(2)
         assertThat(completed.path("status").stringValue()).isEqualTo("COMPLETED")
         assertThat(completed.path("output").path("summary").stringValue()).isEqualTo("Synthetic analysis summary.")
         assertThat(lookup(secondTab, completed)).isEqualTo(completed)
@@ -127,10 +140,12 @@ class StaleGeneralAnalysisHttpTests {
     }
 
     class PausedExecution : GeneralAnalysisExecutionPort {
+        val calls = java.util.concurrent.atomic.AtomicInteger()
         val started = CountDownLatch(1)
         val release = CountDownLatch(1)
 
         override fun execute(input: GeneralAnalysisExecutionInput): GeneralAnalysisExecutionResult {
+            calls.incrementAndGet()
             started.countDown()
             check(release.await(10, TimeUnit.SECONDS))
             return GeneralAnalysisExecutionResult.Success(
@@ -159,6 +174,7 @@ class StaleGeneralAnalysisHttpTests {
         FinanceGeneralAnalysisOutputValidator::class,
         GeneralAnalysisApplicationService::class,
         GeneralAnalysisController::class,
+        GeneralAnalysisApiExceptionHandler::class,
         PausedExecution::class,
     )
     class Harness

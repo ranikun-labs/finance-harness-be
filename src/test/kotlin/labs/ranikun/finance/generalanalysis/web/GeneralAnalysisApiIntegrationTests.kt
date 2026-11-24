@@ -44,7 +44,7 @@ class GeneralAnalysisApiIntegrationTests {
             .contentType(MediaType.APPLICATION_JSON).content(jsonMapper.writeValueAsBytes(mapOf("checkedItemIds" to emptyList<String>(), "confirmed" to true))))
             .andExpect(status().isOk)
         mockMvc.perform(post("/finance/local-fake-analysis/questions/{questionId}/analysis", questionId)
-            .contentType(MediaType.APPLICATION_JSON).content(jsonMapper.writeValueAsBytes(mapOf("checklistId" to checklistId))))
+            .contentType(MediaType.APPLICATION_JSON).content(jsonMapper.writeValueAsBytes(mapOf("checklistId" to checklistId, "expectedRevision" to 1))))
             .andExpect(status().isOk).andExpect(jsonPath("$.status").value("COMPLETED"))
     }
 
@@ -73,7 +73,7 @@ class GeneralAnalysisApiIntegrationTests {
         mockMvc.perform(
             post("/finance/general-analysis/questions/{questionId}/analysis", questionId)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(jsonMapper.writeValueAsBytes(mapOf("checklistId" to checklistId))),
+                .content(jsonMapper.writeValueAsBytes(mapOf("checklistId" to checklistId, "expectedRevision" to 1))),
         )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.status").value("COMPLETED"))

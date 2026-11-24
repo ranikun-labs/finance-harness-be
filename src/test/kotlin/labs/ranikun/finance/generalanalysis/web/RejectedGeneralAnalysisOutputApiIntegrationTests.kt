@@ -96,7 +96,7 @@ class RejectedGeneralAnalysisOutputApiIntegrationTests {
         val analysisBody = mockMvc.perform(
             post("/finance/general-analysis/questions/{questionId}/analysis", questionId)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(jsonMapper.writeValueAsBytes(mapOf("checklistId" to checklistId))),
+                .content(jsonMapper.writeValueAsBytes(mapOf("checklistId" to checklistId, "expectedRevision" to 1))),
         )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.status").value("FAILED"))

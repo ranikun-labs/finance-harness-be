@@ -99,12 +99,14 @@ class GeneralAnalysisApplicationService(
         return updated
     }
 
-    fun analyze(questionId: UUID, checklistId: UUID): GeneralAnalysisView {
+    fun analyze(questionId: UUID, checklistId: UUID, expectedRevision: Long? = null): GeneralAnalysisView {
         val owner = currentUserPort.currentUserId()
         val question = store.findQuestion(owner, questionId) ?: throw QuestionNotFoundException()
         val checklist = store.findChecklist(owner, checklistId) ?: throw ChecklistNotFoundException()
         if (checklist.questionId != question.id) throw ChecklistQuestionMismatchException()
-        if (!checklist.confirmed) throw ChecklistNotConfirmedException()
+        if (!checklist.confirmed || (expectedRevision != null && checklist.revision != expectedRevision)) {
+            throw ChecklistNotConfirmedException()
+        }
 
         var analysis = GeneralAnalysisRecord(
             id = UUID.randomUUID(),

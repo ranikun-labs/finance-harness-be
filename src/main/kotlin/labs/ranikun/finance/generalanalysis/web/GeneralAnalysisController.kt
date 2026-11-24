@@ -45,9 +45,10 @@ data class ConfirmFinanceChecklistResponse(
     val questionId: String,
     val checkedItemIds: Set<String>,
     val confirmed: Boolean,
+    val revision: Long,
 )
 
-data class StartGeneralAnalysisRequest(val checklistId: String)
+data class StartGeneralAnalysisRequest(val checklistId: String, val expectedRevision: Long?)
 
 data class GeneralAnalysisResponse(
     val analysisId: String,
@@ -93,7 +94,8 @@ class GeneralAnalysisController(
     fun analyze(
         @PathVariable questionId: String,
         @RequestBody request: StartGeneralAnalysisRequest,
-    ): GeneralAnalysisResponse = service.analyze(parseId(questionId), parseId(request.checklistId)).toResponse()
+    ): GeneralAnalysisResponse = service.analyze(parseId(questionId), parseId(request.checklistId),
+            request.expectedRevision ?: throw InvalidGeneralAnalysisRequestException()).toResponse()
 
     @GetMapping("/analyses/{analysisId}")
     fun getAnalysis(@PathVariable analysisId: String): GeneralAnalysisResponse =
@@ -119,6 +121,7 @@ class GeneralAnalysisController(
         questionId = questionId.toString(),
         checkedItemIds = checkedItemIds,
         confirmed = confirmed,
+        revision = revision,
     )
 
     private fun GeneralAnalysisView.toResponse() = GeneralAnalysisResponse(
