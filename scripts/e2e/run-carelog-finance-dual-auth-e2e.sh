@@ -243,6 +243,9 @@ core_pid=$!
 
 wait_ready "http://127.0.0.1:$core_management_port/actuator/health/readiness" Core
 
+# Finance is reached through the yml finance-be route (Path=/api/finance/**, StripPrefix=1) that
+# PLATFORM_GATEWAY_FINANCE_BE_URI points at. No Spring JSON env routes override: a higher-precedence
+# routes list replaces every yml route, which removed the carelog-registration and /api/v1/auth routes.
 nohup env \
   SPRING_PROFILES_ACTIVE=finance-trusted-context-reference \
   PLATFORM_ENVIRONMENT=carelog-finance-dual-e2e \
@@ -270,7 +273,6 @@ nohup env \
   PLATFORM_GATEWAY_FINANCE_REFERENCE_PURPOSE=access \
   PLATFORM_GATEWAY_FINANCE_REFERENCE_CLOCK_SKEW_SECONDS=30 \
   PLATFORM_GATEWAY_FINANCE_REFERENCE_MAX_TOKEN_LIFETIME_SECONDS=300 \
-  SPRING_APPLICATION_JSON="{\"spring\":{\"cloud\":{\"gateway\":{\"routes\":[{\"id\":\"finance-reference-e2e\",\"uri\":\"http://127.0.0.1:$finance_port\",\"order\":20,\"predicates\":[\"Path=/finance/**\"]}]}}}}" \
   "$JAVA_HOME_17_X64/bin/java" -jar "$gateway_jar" >"$log_dir/gateway.log" 2>&1 &
 gateway_pid=$!
 

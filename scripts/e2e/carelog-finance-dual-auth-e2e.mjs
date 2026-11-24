@@ -4,7 +4,8 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { appendFile } from 'node:fs/promises';
 
 // Synthetic-only verifier. No seed rows: every account is created through the public HTTP surface.
-// Only statuses, booleans and counts are printed; tokens, passwords, emails and ids are never logged.
+// Only statuses, booleans, counts and the journal Location header are printed; tokens, passwords, emails
+// and account ids are never logged.
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ISSUER_CARELOG_REFERENCE = 'urn:ranikunlabs:identity:finance:reference';
@@ -162,18 +163,21 @@ async function main() {
   };
 
   stage = 'Finance journal create by A through Gateway';
-  const created = await send('POST', `${base}/finance/journals`, {
+  const created = await send('POST', `${base}/api/finance/journals`, {
     headers: { ...authA, 'idempotency-key': `carelog-finance-e2e-${randomUUID()}` },
     body: journal,
   });
   expectStatus(created, 201, 'Finance journal create by A through Gateway');
   assert.match(created.json?.journalId ?? '', UUID_RE);
   const journalId = created.json.journalId;
-  assert.equal(created.headers.get('location'), `/finance/journals/${journalId}`);
+  // Location is logged as the actual header value. Upstream Finance answers /finance/journals/<id>.
+  const location = created.headers.get('location') ?? '';
+  assert.ok(location.endsWith(`/finance/journals/${journalId}`), 'Location must end with /finance/journals/<id>');
+  observed.journalLocation = location;
   observed.journalCreate = created.status;
 
   stage = 'Finance journal detail read by A through Gateway';
-  const detailA = await send('GET', `${base}/finance/journals/${journalId}`, { headers: authA });
+  const detailA = await send('GET', `${base}/api/finance/journals/${journalId}`, { headers: authA });
   expectStatus(detailA, 200, 'Finance journal detail read by A through Gateway');
   assert.equal(detailA.json.journalId, journalId);
   assert.equal(detailA.json.type, journal.type);
@@ -186,7 +190,7 @@ async function main() {
   observed.journalDetailA = detailA.status;
 
   stage = 'Finance journal list read by A through Gateway';
-  const listA = await send('GET', `${base}/finance/journals?limit=20`, { headers: authA });
+  const listA = await send('GET', `${base}/api/finance/journals?limit=20`, { headers: authA });
   expectStatus(listA, 200, 'Finance journal list read by A through Gateway');
   const itemA = listA.json.items.find((item) => item.journalId === journalId);
   assert.ok(itemA, 'A list must contain the journal A created');
@@ -195,7 +199,7 @@ async function main() {
   observed.journalListA = listA.status;
 
   stage = 'Finance journal detail read by B through Gateway';
-  const detailB = await send('GET', `${base}/finance/journals/${journalId}`, { headers: authB });
+  const detailB = await send('GET', `${base}/api/finance/journals/${journalId}`, { headers: authB });
   assert.ok([403, 404].includes(detailB.status), `B detail read expected 403 or 404, got ${detailB.status}`);
   observed.journalDetailB = detailB.status;
   // Record the body shape without the content: whether the response leaks the journal.
@@ -203,7 +207,7 @@ async function main() {
   assert.equal(observed.journalDetailBLeaksContent, false);
 
   stage = 'Finance journal list read by B through Gateway';
-  const listB = await send('GET', `${base}/finance/journals?limit=20`, { headers: authB });
+  const listB = await send('GET', `${base}/api/finance/journals?limit=20`, { headers: authB });
   expectStatus(listB, 200, 'Finance journal list read by B through Gateway');
   assert.ok(!listB.json.items.some((item) => item.journalId === journalId), 'B list must not contain A journal');
   observed.journalListB = listB.status;
@@ -239,7 +243,7 @@ async function main() {
     ENROLLMENT_DISCLOSURE,
     'carelog: registration:201 enrollment_stub_received:1 login:200 wrong_password:401',
     `finance: signup_A:${observed.signupA} signup_B:${observed.signupB} login_A:${observed.loginA} login_B:${observed.loginB}`,
-    `finance: create:201 detail_A:${observed.journalDetailA} list_A:${observed.journalListA}`,
+    `finance: create:201 location=${observed.journalLocation} detail_A:${observed.journalDetailA} list_A:${observed.journalListA}`,
     `finance: detail_B:${observed.journalDetailB} (expected 403 or 404) list_B:${observed.journalListB} list_B_items:${observed.journalListBCount}`,
     `finance: db_owner_matches_A(owner_rows,foreign_rows)=${observed.dbOwnerMatchesA}`,
     `cross(record-only): finance_account_on_carelog_login=${observed.crossFinanceAccountOnCarelogLogin} carelog_account_on_finance_login=${observed.crossCarelogAccountOnFinanceLogin}`,

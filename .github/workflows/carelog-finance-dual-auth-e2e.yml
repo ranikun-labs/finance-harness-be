@@ -12,8 +12,9 @@ on:
 permissions:
   contents: read
 
-# Pins. The candidate commit must be exactly one commit above FINANCE_EXPECTED_SHA and add only the
-# three files in the paths filter above. PLATFORM_SERVICES_* stay placeholders until Main fills them
+# Pins. FINANCE_EXPECTED_SHA must be an ancestor of the candidate (no history rewrite), and the cumulative
+# diff from it to the candidate must be exactly the three files in the paths filter above, all added.
+# PLATFORM_SERVICES_* stay placeholders until Main fills them
 # with the verified platform-services commit and its git tree; the job fails closed until then.
 # CARELOG_ENROLLMENT_TARGET=stub: Carelog enrollment/claims are answered by an embedded synthetic stub,
 # not by carelog-be. Real carelog-be registration/enrollment is NOT verified by this job.
@@ -59,7 +60,8 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 2
+          # Full history so FINANCE_EXPECTED_SHA (an ancestor, not necessarily HEAD^) is present for the pin check.
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Record Carelog enrollment disclosure
@@ -79,16 +81,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-parse HEAD^)" = "$FINANCE_EXPECTED_SHA"
-          # Only additions: no existing file may be modified, renamed or deleted by this candidate.
-          test -z "$(git diff --name-status HEAD^ HEAD | awk '$1 != "A"')"
+          # Fail-closed. No history rewrite: the base only has to be an ancestor of the candidate.
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA" || {
+            echo "FAIL-CLOSED: checked-out HEAD does not equal GITHUB_SHA."; exit 1; }
+          git merge-base --is-ancestor "$FINANCE_EXPECTED_SHA" HEAD || {
+            echo "FAIL-CLOSED: FINANCE_EXPECTED_SHA ($FINANCE_EXPECTED_SHA) is not an ancestor of the candidate."; exit 1; }
+          # Cumulative diff from the base: only additions, and exactly the three owned files.
+          test -z "$(git diff --name-status "$FINANCE_EXPECTED_SHA" HEAD | awk '$1 != "A"')" || {
+            echo "FAIL-CLOSED: candidate modifies, renames or deletes files relative to the base."; exit 1; }
           expected="$(printf '%s\n' \
             .github/workflows/carelog-finance-dual-auth-e2e.yml \
             scripts/e2e/carelog-finance-dual-auth-e2e.mjs \
             scripts/e2e/run-carelog-finance-dual-auth-e2e.sh | sort)"
-          actual="$(git diff --name-only --no-renames HEAD^ HEAD | sort)"
-          test "$actual" = "$expected"
+          actual="$(git diff --name-only --no-renames "$FINANCE_EXPECTED_SHA" HEAD | sort)"
+          test "$actual" = "$expected" || {
+            echo "FAIL-CLOSED: candidate file set differs from the three owned E2E files."; exit 1; }
           finance_tree="$(git rev-parse 'HEAD^{tree}')"
           printf 'finance_candidate_sha=%s\nfinance_candidate_tree=%s\nfinance_base_sha=%s\n' \
             "$GITHUB_SHA" "$finance_tree" "$FINANCE_EXPECTED_SHA" >> "$GITHUB_ENV"
@@ -137,7 +144,7 @@ jobs:
           {
             echo '### Pinned sources'
             echo "- Finance candidate: \`$finance_candidate_sha\` (tree \`$finance_candidate_tree\`)"
-            echo "- Finance base (HEAD^): \`$finance_base_sha\`"
+            echo "- Finance base (ancestor): \`$finance_base_sha\`"
             echo "- Platform-services: \`$PLATFORM_SERVICES_SHA\` (tree \`$PLATFORM_SERVICES_TREE\`)"
           } >> "$GITHUB_STEP_SUMMARY"
 
