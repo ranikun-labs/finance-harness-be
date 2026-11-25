@@ -62,13 +62,19 @@ class FinanceGeneralAnalysisExecutionAdapter(
         FinanceGeneralAnalysisInterpretationParser(),
 ) : GeneralAnalysisExecutionPort {
     override fun execute(input: GeneralAnalysisExecutionInput): GeneralAnalysisExecutionResult {
-        val businessInput = input.toBusinessInput() ?: return GeneralAnalysisExecutionResult.TechnicalFailure
+        // 호출 전 실패도 실패한 요청당 진단 한 줄을 남긴다.
+        val preparedAtNanos = System.nanoTime()
+        fun preCallFailure(): GeneralAnalysisExecutionResult {
+            GeneralAnalysisFailureCode.PRE_CALL_FAILURE.log(input.analysisRequestId, preparedAtNanos)
+            return GeneralAnalysisExecutionResult.TechnicalFailure
+        }
+        val businessInput = input.toBusinessInput() ?: return preCallFailure()
         val context = try {
             contextFactory.create(input.owner, input.questionId, input.checklistId, input.analysisRequestId)
         } catch (_: Exception) {
-            return GeneralAnalysisExecutionResult.TechnicalFailure
+            return preCallFailure()
         }
-        if (!isTrustedFinanceContext(input, context)) return GeneralAnalysisExecutionResult.TechnicalFailure
+        if (!isTrustedFinanceContext(input, context)) return preCallFailure()
 
         val request = FinanceSharedAiRequest(
             context = context,
@@ -77,26 +83,38 @@ class FinanceGeneralAnalysisExecutionAdapter(
             query = try {
                 queryFormatter.format(businessInput)
             } catch (_: Exception) {
-                return GeneralAnalysisExecutionResult.TechnicalFailure
+                return preCallFailure()
             },
         )
         val startedAtNanos = System.nanoTime()
         val outcome = try {
             sharedAiPort.execute(request)
         } catch (_: Exception) {
+            // 예외 메시지는 응답 본문을 담을 수 있으므로 기록하지 않는다.
+            GeneralAnalysisFailureCode.EXECUTION_EXCEPTION.log(input.analysisRequestId, startedAtNanos)
             return GeneralAnalysisExecutionResult.TechnicalFailure
         }
 
         return when (outcome) {
-            is FinanceSharedAiOutcome.TechnicalFailure -> GeneralAnalysisExecutionResult.TechnicalFailure
+            is FinanceSharedAiOutcome.TechnicalFailure -> {
+                GeneralAnalysisFailureCode.SHARED_AI_FAILURE.log(input.analysisRequestId, startedAtNanos, outcome.category)
+                GeneralAnalysisExecutionResult.TechnicalFailure
+            }
             is FinanceSharedAiOutcome.TransportFailure -> {
-                val code = when (outcome.category) {
-                    FinanceSharedAiTransportFailure.TIMEOUT -> GeneralAnalysisFailureCode.HTTP_TIMEOUT
+                val id = input.analysisRequestId
+                when (outcome.category) {
+                    FinanceSharedAiTransportFailure.TIMEOUT -> GeneralAnalysisFailureCode.HTTP_TIMEOUT.log(id, startedAtNanos)
                     FinanceSharedAiTransportFailure.MALFORMED_RESPONSE,
-                    FinanceSharedAiTransportFailure.RESPONSE_TOO_LARGE -> GeneralAnalysisFailureCode.RESPONSE_INVALID
-                    else -> null
+                    FinanceSharedAiTransportFailure.RESPONSE_TOO_LARGE -> GeneralAnalysisFailureCode.RESPONSE_INVALID.log(id, startedAtNanos)
+                    FinanceSharedAiTransportFailure.HTTP_STATUS ->
+                        GeneralAnalysisFailureCode.HTTP_STATUS.log(id, startedAtNanos, outcome.httpStatus)
+                    FinanceSharedAiTransportFailure.NETWORK,
+                    FinanceSharedAiTransportFailure.INTERRUPTED ->
+                        GeneralAnalysisFailureCode.NETWORK_ERROR.log(id, startedAtNanos, outcome.category)
+                    // 클라이언트가 요청을 보내기 전에 거절한 경우다.
+                    FinanceSharedAiTransportFailure.INVALID_REQUEST ->
+                        GeneralAnalysisFailureCode.PRE_CALL_FAILURE.log(id, startedAtNanos)
                 }
-                code?.log(input.analysisRequestId, startedAtNanos)
                 GeneralAnalysisExecutionResult.TechnicalFailure
             }
 

@@ -12,6 +12,9 @@ import labs.ranikun.finance.generalanalysis.application.FinanceSharedAiRequestCo
 import labs.ranikun.finance.generalanalysis.application.FinanceSharedAiTransportFailure
 import labs.ranikun.finance.generalanalysis.application.GeneralAnalysisApplicationService
 import labs.ranikun.finance.generalanalysis.application.GeneralAnalysisExecutionPort
+import labs.ranikun.finance.generalanalysis.application.GeneralAnalysisExecutionInput
+import labs.ranikun.finance.generalanalysis.application.GeneralAnalysisExecutionResult
+import labs.ranikun.finance.generalanalysis.application.FinanceSharedAiPort
 import labs.ranikun.finance.generalanalysis.domain.GeneralAnalysisCandidate
 import labs.ranikun.finance.generalanalysis.domain.GeneralAnalysisStatus
 import labs.ranikun.finance.identity.application.CurrentUserPort
@@ -409,6 +412,79 @@ class FinanceSharedAiHttpClientTests {
                 }
             }
         }
+        // fixture에 심은 응답·답변·질문 문구가 어떤 로그에도 남지 않아야 한다.
+        assertThat(output.all).doesNotContain(
+            "synthetic invalid response detail",
+            "synthetic invalid answer detail",
+            "Price target is 120",
+            "How can I verify this synthetic diagnostic fixture?",
+        )
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension::class)
+    fun `logs one fixed diagnostic for failures that previously ended without one`(output: CapturedOutput) {
+        val secretBody = "synthetic-response-body-SECRET"
+        val secretException = "sk-synthetic-exception-SECRET"
+        val secretQuestion = "How can I verify the synthetic-question-SECRET fixture?"
+        val unreachable = LocalJsonServer { it.close() }.use { it.baseUrl }
+
+        fun httpAdapter(baseUrl: URI) = FinanceGeneralAnalysisExecutionAdapter(
+            LocalFinanceExecutionContextFactory("tenant:diagnostics-test"),
+            FinanceSharedAiHttpClient(baseUrl),
+        )
+
+        fun respondingAdapter(status: Int, body: () -> String, run: (GeneralAnalysisExecutionPort) -> Unit) =
+            LocalJsonServer { exchange ->
+                exchange.readBody()
+                exchange.respond(status, body())
+            }.use { server -> run(httpAdapter(server.baseUrl)) }
+
+        // 기대 진단 줄(analysisRequestId 이후)의 정규식. 실패 코드와 허용된 detail만 나온다.
+        val cases = listOf<Pair<String, ((GeneralAnalysisExecutionPort) -> Unit) -> Unit>>(
+            "failureCode=SHARED_AI_FAILURE detail=MODEL_FAILURE" to { run -> respondingAdapter(200, { technicalFailureResponse() }, run) },
+            "failureCode=HTTP_STATUS detail=500" to { run -> respondingAdapter(500, { secretBody }, run) },
+            "failureCode=HTTP_STATUS detail=404" to { run -> respondingAdapter(404, { secretBody }, run) },
+            "failureCode=RESPONSE_INVALID" to { run -> respondingAdapter(200, { "x".repeat(MAX_RESPONSE_BYTES + 1) }, run) },
+            "failureCode=NETWORK_ERROR detail=NETWORK" to { run -> run(httpAdapter(unreachable)) },
+            "failureCode=PRE_CALL_FAILURE" to { run ->
+                run(FinanceGeneralAnalysisExecutionAdapter(
+                    { _, _, _, _ -> throw IllegalStateException(secretException) },
+                    FinanceSharedAiPort { error("must not be called") },
+                ))
+            },
+            "failureCode=EXECUTION_EXCEPTION" to { run ->
+                run(FinanceGeneralAnalysisExecutionAdapter(
+                    LocalFinanceExecutionContextFactory("tenant:diagnostics-test"),
+                    FinanceSharedAiPort { throw IllegalStateException(secretException) },
+                ))
+            },
+            "failureCode=EXECUTION_EXCEPTION" to { run ->
+                run(object : GeneralAnalysisExecutionPort {
+                    override fun execute(input: GeneralAnalysisExecutionInput): GeneralAnalysisExecutionResult =
+                        throw IllegalStateException(secretException)
+                })
+            },
+        )
+        for ((expected, scenario) in cases) {
+            scenario { port ->
+                val service = service(port)
+                val question = service.createQuestion(secretQuestion)
+                service.confirmChecklist(question.questionId, question.checklistId, setOf("known_facts"), true)
+
+                val result = service.analyze(question.questionId, question.checklistId)
+
+                val diagnostics = output.all.lineSequence()
+                    .filter { it.contains("analysisRequestId=${result.analysisId} ") }
+                    .map { it.substringAfter("analysisRequestId=").substringBefore('"') }
+                    .toList()
+                assertThat(result.status).`as`(expected).isEqualTo(GeneralAnalysisStatus.FAILED)
+                assertThat(result.output).isNull()
+                assertThat(diagnostics).`as`(expected).hasSize(1)
+                assertThat(diagnostics.single()).matches("${result.analysisId} elapsedMs=[0-9]+ $expected")
+            }
+        }
+        assertThat(output.all).doesNotContain(secretBody, secretException, secretQuestion, "synthetic-question-SECRET")
     }
 
     @Test

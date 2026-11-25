@@ -108,6 +108,8 @@ sealed interface FinanceSharedAiOutcome {
 
     data class TransportFailure(
         val category: FinanceSharedAiTransportFailure,
+        // HTTP_STATUS일 때만 응답 상태 숫자를 담는다. 응답 본문은 담지 않는다.
+        val httpStatus: Int? = null,
     ) : FinanceSharedAiOutcome
 }
 

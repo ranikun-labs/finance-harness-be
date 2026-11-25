@@ -158,6 +158,8 @@ class GeneralAnalysisApplicationService(
                 ),
             )
         } catch (_: Exception) {
+            // 실행 포트 자체가 던진 예외. 메시지는 기록하지 않는다.
+            GeneralAnalysisFailureCode.EXECUTION_EXCEPTION.log(analysis.id, startedAtNanos)
             GeneralAnalysisExecutionResult.TechnicalFailure
         }
 

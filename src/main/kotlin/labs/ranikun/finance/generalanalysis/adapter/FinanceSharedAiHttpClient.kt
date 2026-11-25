@@ -83,7 +83,10 @@ internal class FinanceSharedAiHttpClient(
         }
 
         if (response.statusCode() != HTTP_OK) {
-            return FinanceSharedAiOutcome.TransportFailure(FinanceSharedAiTransportFailure.HTTP_STATUS)
+            return FinanceSharedAiOutcome.TransportFailure(
+                FinanceSharedAiTransportFailure.HTTP_STATUS,
+                httpStatus = response.statusCode(),
+            )
         }
         return parseOutcome(response.body())
     }
