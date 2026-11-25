@@ -55,4 +55,21 @@ interface GeneralAnalysisExecutionPort {
 
 interface GeneralAnalysisOutputValidator {
     fun isValid(candidate: GeneralAnalysisCandidate): Boolean
+
+    /** null이면 통과. 실패 시 고정 규칙 이름만 돌려주며, 로그 detail로만 쓴다. */
+    fun rejectionRule(candidate: GeneralAnalysisCandidate): OutputRejectionRule? =
+        if (isValid(candidate)) null else OutputRejectionRule.UNCLASSIFIED
+}
+
+/** 출력 거절 규칙 식별자. 응답 내용은 담지 않고 어떤 규칙이 막았는지만 기록한다. */
+enum class OutputRejectionRule {
+    SUMMARY_OR_EVIDENCE_BLANK,
+    EMPTY_ARRAY,
+    FIELD_BLANK,
+    FIELD_TOO_LONG,
+    UNSUPPORTED_FINANCIAL_CONTENT,
+    DIRECT_SHORT_SYMBOL_ACTION,
+    DIRECT_BROKER_ACTION,
+    VALIDATOR_EXCEPTION,
+    UNCLASSIFIED,
 }

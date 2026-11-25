@@ -169,14 +169,16 @@ class GeneralAnalysisApplicationService(
                 output = null,
             )
 
-            is GeneralAnalysisExecutionResult.Success -> if (isValid(executionResult.candidate)) {
-                analysis.copy(
-                    status = GeneralAnalysisStatus.COMPLETED,
-                    output = executionResult.candidate,
-                )
-            } else {
-                GeneralAnalysisFailureCode.OUTPUT_REJECTED.log(analysis.id, startedAtNanos)
-                analysis.copy(status = GeneralAnalysisStatus.FAILED, output = null)
+            is GeneralAnalysisExecutionResult.Success -> rejectionRuleOf(executionResult.candidate).let { rule ->
+                if (rule == null) {
+                    analysis.copy(
+                        status = GeneralAnalysisStatus.COMPLETED,
+                        output = executionResult.candidate,
+                    )
+                } else {
+                    GeneralAnalysisFailureCode.OUTPUT_REJECTED.log(analysis.id, startedAtNanos, rule)
+                    analysis.copy(status = GeneralAnalysisStatus.FAILED, output = null)
+                }
             }
         }
         return finishAnalysis(analysis).toView()
@@ -220,10 +222,10 @@ class GeneralAnalysisApplicationService(
             checklist.revision == analysis.checklistRevision && checklist.checkedItemIds == analysis.checkedItemIds
     }
 
-    private fun isValid(candidate: GeneralAnalysisCandidate): Boolean = try {
-        outputValidator.isValid(candidate)
+    private fun rejectionRuleOf(candidate: GeneralAnalysisCandidate): OutputRejectionRule? = try {
+        outputValidator.rejectionRule(candidate)
     } catch (_: Exception) {
-        false
+        OutputRejectionRule.VALIDATOR_EXCEPTION
     }
 
     private fun GeneralAnalysisRecord.toView() = GeneralAnalysisView(id, status, output)

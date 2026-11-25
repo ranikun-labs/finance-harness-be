@@ -408,7 +408,9 @@ class FinanceSharedAiHttpClientTests {
                     assertThat(result.status).isEqualTo(GeneralAnalysisStatus.FAILED)
                     assertThat(result.output).isNull()
                     assertThat(diagnostics).hasSize(1)
-                    assertThat(diagnostics.single()).matches("${result.analysisId} elapsedMs=[0-9]+ failureCode=$expectedCode")
+                    // OUTPUT_REJECTED는 거절 규칙의 고정 코드만 detail로 남긴다(본문 미기록).
+                    val expectedSuffix = if (expectedCode == "OUTPUT_REJECTED") " detail=UNSUPPORTED_FINANCIAL_CONTENT" else ""
+                    assertThat(diagnostics.single()).matches("${result.analysisId} elapsedMs=[0-9]+ failureCode=$expectedCode$expectedSuffix")
                 }
             }
         }

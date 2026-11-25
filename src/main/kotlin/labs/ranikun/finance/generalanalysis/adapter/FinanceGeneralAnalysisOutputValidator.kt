@@ -1,6 +1,7 @@
 package labs.ranikun.finance.generalanalysis.adapter
 
 import labs.ranikun.finance.generalanalysis.application.GeneralAnalysisOutputValidator
+import labs.ranikun.finance.generalanalysis.application.OutputRejectionRule
 import labs.ranikun.finance.generalanalysis.domain.GeneralAnalysisCandidate
 import org.springframework.context.annotation.Profile
 import org.springframework.stereotype.Component
@@ -9,19 +10,25 @@ import org.springframework.stereotype.Component
 @Component
 @Profile("!prod & !production & (local | test)")
 class FinanceGeneralAnalysisOutputValidator : GeneralAnalysisOutputValidator {
-    override fun isValid(candidate: GeneralAnalysisCandidate): Boolean {
+    override fun isValid(candidate: GeneralAnalysisCandidate): Boolean = rejectionRule(candidate) == null
+
+    override fun rejectionRule(candidate: GeneralAnalysisCandidate): OutputRejectionRule? {
         val fields = listOf(candidate.summary, candidate.evidenceNote) +
             candidate.observations + candidate.assumptions + candidate.nextChecks
-        if (candidate.summary.isBlank() || candidate.evidenceNote.isBlank()) return false
+        if (candidate.summary.isBlank() || candidate.evidenceNote.isBlank()) return OutputRejectionRule.SUMMARY_OR_EVIDENCE_BLANK
         if (candidate.observations.isEmpty() || candidate.assumptions.isEmpty() || candidate.nextChecks.isEmpty()) {
-            return false
+            return OutputRejectionRule.EMPTY_ARRAY
         }
-        if (fields.any { it.isBlank() || it.length > MAX_FIELD_LENGTH }) return false
-        return fields.none {
-            UNSUPPORTED_FINANCIAL_CONTENT_PATTERN.containsMatchIn(it) ||
-                DIRECT_SHORT_SYMBOL_ACTION_PATTERN.containsMatchIn(it) ||
-                DIRECT_BROKER_ACTION_PATTERN.containsMatchIn(it)
+        if (fields.any { it.isBlank() }) return OutputRejectionRule.FIELD_BLANK
+        if (fields.any { it.length > MAX_FIELD_LENGTH }) return OutputRejectionRule.FIELD_TOO_LONG
+        if (fields.any { UNSUPPORTED_FINANCIAL_CONTENT_PATTERN.containsMatchIn(it) }) {
+            return OutputRejectionRule.UNSUPPORTED_FINANCIAL_CONTENT
         }
+        if (fields.any { DIRECT_SHORT_SYMBOL_ACTION_PATTERN.containsMatchIn(it) }) {
+            return OutputRejectionRule.DIRECT_SHORT_SYMBOL_ACTION
+        }
+        if (fields.any { DIRECT_BROKER_ACTION_PATTERN.containsMatchIn(it) }) return OutputRejectionRule.DIRECT_BROKER_ACTION
+        return null
     }
 
     private companion object {
