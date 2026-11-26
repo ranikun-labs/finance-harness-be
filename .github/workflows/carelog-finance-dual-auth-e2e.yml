@@ -117,9 +117,33 @@ jobs:
             exit 1
           }
 
+      # Trust gate. Runs before any secret step and fails closed. The token is allowed only for
+      # push or workflow_dispatch on the trusted branch, with HEAD equal to the triggering SHA.
+      # FINANCE_EXPECTED_SHA ancestry is enforced by the candidate pin step above.
+      - name: Gate read token to trusted branch events
+        id: gate
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          trusted_ref='refs/heads/claude/great-heisenberg-u3i75y'
+          case "$EVENT_NAME" in
+            push|workflow_dispatch) ;;
+            *) echo "FAIL-CLOSED: event $EVENT_NAME may not receive the read token." >&2; exit 1 ;;
+          esac
+          if [ "$REF" != "$trusted_ref" ]; then
+            echo "FAIL-CLOSED: $EVENT_NAME from $REF may not receive the read token (trusted ref only)." >&2
+            exit 1
+          fi
+          test "$(git rev-parse HEAD)" = "$SHA" || {
+            echo "FAIL-CLOSED: checked-out HEAD does not equal GITHUB_SHA." >&2; exit 1; }
+          echo "allowed=true" >> "$GITHUB_OUTPUT"
+
       - name: Verify RANIKUN_DEV_READ_TOKEN is configured
-        # Trusted events only (push to this branch, or manual dispatch). Forks and pull_request runs never get the token.
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: steps.gate.outputs.allowed == 'true'
         env:
           RANIKUN_DEV_READ_TOKEN: ${{ secrets.RANIKUN_DEV_READ_TOKEN }}
         shell: bash
@@ -132,7 +156,7 @@ jobs:
           fi
 
       - name: Download and verify pinned platform-services source
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: steps.gate.outputs.allowed == 'true'
         env:
           RANIKUN_DEV_READ_TOKEN: ${{ secrets.RANIKUN_DEV_READ_TOKEN }}
         shell: bash
@@ -155,6 +179,36 @@ jobs:
           platform_tree="$(git -C "$platform_dir" write-tree)"
           test "$platform_tree" = "$PLATFORM_SERVICES_TREE"
           echo "PLATFORM_SOURCE_DIR=$platform_dir" >> "$GITHUB_ENV"
+
+      # Private-auth probe on a private ranikun-labs repo. Read-only; the tarball is deleted at once.
+      # Prints only ANON=<http code>, then PRIVATE_AUTH=ok <repo>@<sha7> or PRIVATE_AUTH=fail stage=<name>.
+      - name: Probe private read access with the read token
+        if: steps.gate.outputs.allowed == 'true'
+        env:
+          RANIKUN_DEV_READ_TOKEN: ${{ secrets.RANIKUN_DEV_READ_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo='ranikun-labs/design-system'
+          anon="$(curl -s -o /dev/null -w '%{http_code}' "https://api.github.com/repos/$repo" || true)"
+          echo "ANON=${anon:-000}"
+          auth_cfg() { printf 'header = "Authorization: Bearer %s"\n' "$RANIKUN_DEV_READ_TOKEN"; }
+          sha="$(curl -s --fail --config <(auth_cfg) -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/$repo/commits/HEAD" | jq -r '.sha' || true)"
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "PRIVATE_AUTH=fail stage=resolve"; exit 1
+          fi
+          archive="$RUNNER_TEMP/private-probe.tar.gz"
+          code="$(curl -s -o "$archive" -w '%{http_code}' --location --config <(auth_cfg) \
+            "https://codeload.github.com/$repo/tar.gz/$sha" || true)"
+          if [ "${code:-000}" != "200" ]; then
+            rm -f "$archive"; echo "PRIVATE_AUTH=fail stage=download http=${code:-000}"; exit 1
+          fi
+          if ! gzip -t "$archive" >/dev/null 2>&1; then
+            rm -f "$archive"; echo "PRIVATE_AUTH=fail stage=archive"; exit 1
+          fi
+          rm -f "$archive"
+          echo "PRIVATE_AUTH=ok ${repo}@${sha:0:7}"
 
       - name: Record pinned sources in job summary
         shell: bash
