@@ -14,8 +14,7 @@ permissions:
 
 # Pins. FINANCE_EXPECTED_SHA must be an ancestor of the candidate (no history rewrite), and the cumulative
 # diff from it to the candidate must be exactly the three files in the paths filter above, all added.
-# PLATFORM_SERVICES_* stay placeholders until Main fills them
-# with the verified platform-services commit and its git tree; the job fails closed until then.
+# PLATFORM_SERVICES_* are pinned to the verified platform-services commit and its git tree.
 # CARELOG_ENROLLMENT_TARGET=stub: Carelog enrollment/claims are answered by an embedded synthetic stub,
 # not by carelog-be. Real carelog-be registration/enrollment is NOT verified by this job.
 env:
@@ -29,6 +28,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Main E2E. Holds NO secret. Every input it needs is public (platform-services is fetched anonymously and
+  # verified by tree), so a compromised candidate workflow cannot read a token from this job.
   dual-auth-e2e:
     if: github.repository == 'ranikun-labs/finance-harness-be'
     runs-on: ubuntu-latest
@@ -104,69 +105,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Fail-closed by design: this candidate cannot run until Main replaces both placeholders in the
-          # env block above with a verified platform-services commit SHA and its tree SHA (40 lowercase hex).
           [[ "$PLATFORM_SERVICES_SHA" =~ ^[0-9a-f]{40}$ ]] || {
-            echo "FAIL-CLOSED: PLATFORM_SERVICES_SHA is '$PLATFORM_SERVICES_SHA' (placeholder, not a 40-hex commit SHA)."
-            echo "Main must pin the verified platform-services commit in the workflow env block. Not a Finance code failure."
-            exit 1
-          }
+            echo "FAIL-CLOSED: PLATFORM_SERVICES_SHA is not a 40-hex commit SHA."; exit 1; }
           [[ "$PLATFORM_SERVICES_TREE" =~ ^[0-9a-f]{40}$ ]] || {
-            echo "FAIL-CLOSED: PLATFORM_SERVICES_TREE is '$PLATFORM_SERVICES_TREE' (placeholder, not a 40-hex tree SHA)."
-            echo "Main must pin the verified platform-services git tree in the workflow env block. Not a Finance code failure."
-            exit 1
-          }
+            echo "FAIL-CLOSED: PLATFORM_SERVICES_TREE is not a 40-hex tree SHA."; exit 1; }
 
-      # Trust gate. Runs before any secret step and fails closed. The token is allowed only for
-      # push or workflow_dispatch on the trusted branch, with HEAD equal to the triggering SHA.
-      # FINANCE_EXPECTED_SHA ancestry is enforced by the candidate pin step above.
-      - name: Gate read token to trusted branch events
-        id: gate
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          REF: ${{ github.ref }}
-          SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          trusted_ref='refs/heads/claude/great-heisenberg-u3i75y'
-          case "$EVENT_NAME" in
-            push|workflow_dispatch) ;;
-            *) echo "FAIL-CLOSED: event $EVENT_NAME may not receive the read token." >&2; exit 1 ;;
-          esac
-          if [ "$REF" != "$trusted_ref" ]; then
-            echo "FAIL-CLOSED: $EVENT_NAME from $REF may not receive the read token (trusted ref only)." >&2
-            exit 1
-          fi
-          test "$(git rev-parse HEAD)" = "$SHA" || {
-            echo "FAIL-CLOSED: checked-out HEAD does not equal GITHUB_SHA." >&2; exit 1; }
-          echo "allowed=true" >> "$GITHUB_OUTPUT"
-
-      - name: Verify RANIKUN_DEV_READ_TOKEN is configured
-        if: steps.gate.outputs.allowed == 'true'
-        env:
-          RANIKUN_DEV_READ_TOKEN: ${{ secrets.RANIKUN_DEV_READ_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Presence check only. The value is never echoed.
-          if [ -z "${RANIKUN_DEV_READ_TOKEN:-}" ]; then
-            echo "RANIKUN_DEV_READ_TOKEN missing: set org secret or repo secret" >&2
-            exit 1
-          fi
-
+      # Anonymous fetch: platform-services is public. No token is sent from this job.
       - name: Download and verify pinned platform-services source
-        if: steps.gate.outputs.allowed == 'true'
-        env:
-          RANIKUN_DEV_READ_TOKEN: ${{ secrets.RANIKUN_DEV_READ_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
           archive="$RUNNER_TEMP/platform-services.zip"
           unpack="$RUNNER_TEMP/platform-services"
-          # Header is fed via process substitution so the token never appears in argv.
           curl --fail --silent --show-error --location \
-            --config <(printf 'header = "Authorization: Bearer %s"\n' "$RANIKUN_DEV_READ_TOKEN") \
             "https://codeload.github.com/ranikun-labs/platform-services/zip/$PLATFORM_SERVICES_SHA" \
             -o "$archive"
           mkdir -p "$unpack"
@@ -179,48 +130,7 @@ jobs:
           platform_tree="$(git -C "$platform_dir" write-tree)"
           test "$platform_tree" = "$PLATFORM_SERVICES_TREE"
           echo "PLATFORM_SOURCE_DIR=$platform_dir" >> "$GITHUB_ENV"
-
-      # Report-only private-auth probe on private ranikun-labs repos. Never fails the job, so E2E still runs.
-      # Per repo it prints only the ANON and HTTP status codes plus a result. Bodies and the token are never printed.
-      - name: Probe private read access with the read token
-        id: probe
-        if: steps.gate.outputs.allowed == 'true'
-        env:
-          RANIKUN_DEV_READ_TOKEN: ${{ secrets.RANIKUN_DEV_READ_TOKEN }}
-        shell: bash
-        run: |
-          set -uo pipefail
-          overall=ok
-          auth_cfg() { printf 'header = "Authorization: Bearer %s"\n' "$RANIKUN_DEV_READ_TOKEN"; }
-          probe_repo() {
-            local repo="$1" name anon res_http dl_http sha tmp archive status line
-            name="${repo#ranikun-labs/}"
-            anon="$(curl -s -o /dev/null -w '%{http_code}' "https://api.github.com/repos/$repo" 2>/dev/null)" || anon=000
-            tmp="$RUNNER_TEMP/probe-$name.json"
-            res_http="$(curl -s -o "$tmp" -w '%{http_code}' --config <(auth_cfg) \
-              -H 'Accept: application/vnd.github+json' \
-              "https://api.github.com/repos/$repo/commits/HEAD" 2>/dev/null)" || res_http=000
-            sha="$(jq -r '.sha // empty' "$tmp" 2>/dev/null || true)"
-            rm -f "$tmp"
-            dl_http=000; status=fail
-            if [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
-              archive="$RUNNER_TEMP/probe-$name.tar.gz"
-              dl_http="$(curl -s -o "$archive" -w '%{http_code}' --location --config <(auth_cfg) \
-                "https://codeload.github.com/$repo/tar.gz/$sha" 2>/dev/null)" || dl_http=000
-              if [ "$dl_http" = "200" ] && gzip -t "$archive" >/dev/null 2>&1; then status=ok; fi
-              rm -f "$archive"
-            fi
-            [ "$status" = ok ] || overall=fail
-            line="REPO=$name ANON=$anon RESOLVE_HTTP=$res_http DOWNLOAD_HTTP=$dl_http PRIVATE_AUTH=$status"
-            if [ "$status" = ok ]; then line="$line SHA=${sha:0:7}"; fi
-            echo "$line"
-            echo "- $line" >> "$GITHUB_STEP_SUMMARY"
-          }
-          echo "### Private read probe (report-only)" >> "$GITHUB_STEP_SUMMARY"
-          probe_repo 'ranikun-labs/design-system'
-          probe_repo 'ranikun-labs/shared-ai-fastapi-poc'
-          echo "private_auth=$overall" >> "$GITHUB_OUTPUT"
-          exit 0
+          rm -f "$archive"
 
       - name: Record pinned sources in job summary
         shell: bash
@@ -248,3 +158,129 @@ jobs:
           ./scripts/e2e/run-carelog-finance-dual-auth-e2e.sh
           "$GITHUB_WORKSPACE"
           "$PLATFORM_SOURCE_DIR"
+
+  # Private read probe. Runs ONLY under the `dev-private-read` environment, which the Owner configures with
+  # a deployment branch policy (trusted candidate branch only), required reviewers, and an environment-scoped
+  # secret DEV_PRIVATE_READ_TOKEN. Verdict semantics:
+  #   TRANSITION_EVIDENCE=protected          -> probe ran under the protected environment and passed.
+  #   TRANSITION_EVIDENCE=unavailable (...)  -> environment secret not provided; no evidence.
+  #   TRANSITION_EVIDENCE=failed (...)       -> environment secret present but a probe check failed.
+  # Only runs under the protected environment count for the Private-switch decision. Runs on unprotected
+  # branches are excluded, even when they print `protected`. The job does NOT gate or block the main E2E
+  # (no `needs:` edge), so waiting for reviewer approval never blocks E2E.
+  # The secret is named DEV_PRIVATE_READ_TOKEN (not RANIKUN_DEV_READ_TOKEN) so that GitHub cannot fall back to a
+  # repo/org secret of the same name inside this job. Token only reaches curl via --config process substitution.
+  private-read-probe:
+    if: github.repository == 'ranikun-labs/finance-harness-be'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: dev-private-read
+    concurrency:
+      group: carelog-private-read-probe-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      # Trust gate. Candidate-editable, so it is defence in depth only. The enforcing controls are the
+      # environment deployment branch policy and the protected trusted branch (see the PR body).
+      - name: Gate read token to trusted branch events
+        id: gate
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          trusted_ref='refs/heads/claude/great-heisenberg-u3i75y'
+          case "$EVENT_NAME" in
+            push|workflow_dispatch) ;;
+            *) echo "FAIL-CLOSED: event $EVENT_NAME may not receive the read token." >&2; exit 1 ;;
+          esac
+          if [ "$REF" != "$trusted_ref" ]; then
+            echo "FAIL-CLOSED: $EVENT_NAME from $REF may not receive the read token (trusted ref only)." >&2
+            exit 1
+          fi
+
+      - name: Check out candidate (pinned to triggering SHA, no credentials persisted)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Private read probe
+        id: probe
+        shell: bash
+        env:
+          DEV_PRIVATE_READ_TOKEN: ${{ secrets.DEV_PRIVATE_READ_TOKEN }}
+          PLATFORM_SERVICES_SHA: ${{ env.PLATFORM_SERVICES_SHA }}
+          PLATFORM_SERVICES_TREE: ${{ env.PLATFORM_SERVICES_TREE }}
+        run: |
+          set -uo pipefail
+          # Never enable tracing here. Bodies and the token are never printed.
+          work="$(mktemp -d "$RUNNER_TEMP/private-probe.XXXXXX")"
+          trap 'rm -rf "$work"' EXIT
+          # Token only ever reaches curl through a process-substitution config file, never argv.
+          auth_cfg() { printf 'header = "Authorization: Bearer %s"\n' "$DEV_PRIVATE_READ_TOKEN"; }
+
+          if [ -z "${DEV_PRIVATE_READ_TOKEN:-}" ]; then
+            echo "TRANSITION_EVIDENCE=unavailable (environment secret not provided)"
+            echo "- TRANSITION_EVIDENCE=unavailable (environment secret not provided)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          overall=ok
+          probe_repo() {
+            local repo="$1" name anon res_http dl_http sha tmp archive status line key
+            name="${repo#ranikun-labs/}"
+            key="${name//-/_}"
+            anon="$(curl -s -o /dev/null -w '%{http_code}' "https://api.github.com/repos/$repo" 2>/dev/null)" || anon=000
+            tmp="$work/$name.json"
+            res_http="$(curl -s -o "$tmp" -w '%{http_code}' --config <(auth_cfg) \
+              -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/$repo/commits/HEAD" 2>/dev/null)" || res_http=000
+            sha="$(jq -r '.sha // empty' "$tmp" 2>/dev/null || true)"
+            dl_http=000; status=fail
+            if [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+              archive="$work/$name.tar.gz"
+              dl_http="$(curl -s -o "$archive" -w '%{http_code}' --location --config <(auth_cfg) \
+                "https://codeload.github.com/$repo/tar.gz/$sha" 2>/dev/null)" || dl_http=000
+              if [ "$dl_http" = "200" ] && gzip -t "$archive" >/dev/null 2>&1; then status=ok; fi
+            fi
+            [ "$status" = ok ] || overall=fail
+            line="REPO=$name ANON=$anon RESOLVE_HTTP=$res_http DOWNLOAD_HTTP=$dl_http PRIVATE_AUTH=$status"
+            if [ "$status" = ok ]; then line="$line SHA=${sha:0:7}"; fi
+            echo "$line"
+            echo "- $line" >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          # Private platform-services: the same pinned zip and tree check the main job does anonymously.
+          pinned_tree_check() {
+            local archive="$work/platform-services.zip" unpack="$work/platform-services" pdir tree
+            local code
+            code="$(curl -s -o "$archive" -w '%{http_code}' --location --config <(auth_cfg) \
+              "https://codeload.github.com/ranikun-labs/platform-services/zip/$PLATFORM_SERVICES_SHA" 2>/dev/null)" || code=000
+            if [ "$code" = "200" ]; then
+              mkdir -p "$unpack" && unzip -q "$archive" -d "$unpack" 2>/dev/null || true
+              pdir="$(find "$unpack" -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null)"
+              if [ -n "$pdir" ]; then
+                git -C "$pdir" init -q && git -C "$pdir" add -f -A && tree="$(git -C "$pdir" write-tree)"
+                if [ "$tree" = "$PLATFORM_SERVICES_TREE" ]; then
+                  echo "PINNED_TREE=platform-services:ok"; return 0
+                fi
+              fi
+            fi
+            echo "PINNED_TREE=platform-services:fail (http=$code)"; return 1
+          }
+
+          probe_repo 'ranikun-labs/design-system'
+          probe_repo 'ranikun-labs/shared-ai-fastapi-poc'
+          pinned_tree_check || overall=fail
+
+          if [ "$overall" = ok ]; then
+            echo "TRANSITION_EVIDENCE=protected"
+            echo "- TRANSITION_EVIDENCE=protected" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "TRANSITION_EVIDENCE=failed (a probe check did not pass)"
+            echo "- TRANSITION_EVIDENCE=failed (a probe check did not pass)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # Report-only: the verdict line is the signal, the job does not fail the workflow.
+          exit 0
