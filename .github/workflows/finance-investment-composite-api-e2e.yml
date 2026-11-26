@@ -53,12 +53,27 @@ jobs:
           ref: ${{ github.sha }}
           path: finance-source
           persist-credentials: false
+      - name: Verify RANIKUN_DEV_READ_TOKEN is configured
+        # Trusted events only. The job already requires refs/heads/main; this keeps the token off any future pull_request trigger.
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          RANIKUN_DEV_READ_TOKEN: ${{ secrets.RANIKUN_DEV_READ_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Presence check only. The value is never echoed.
+          if [ -z "${RANIKUN_DEV_READ_TOKEN:-}" ]; then
+            echo "RANIKUN_DEV_READ_TOKEN missing: set org secret or repo secret" >&2
+            exit 1
+          fi
       - name: Check out merged Core and Gateway
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: ranikun-labs/platform-services
           ref: 5a0b0dc38f1d53655cc21613f9b202a317d7c37d
           path: platform-source
+          token: ${{ secrets.RANIKUN_DEV_READ_TOKEN }}
           persist-credentials: false
       - name: Check out pinned Finance FE
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
