@@ -5,6 +5,8 @@ on:
     branches: [claude/great-heisenberg-u3i75y]
     paths:
       - .github/workflows/carelog-finance-dual-auth-e2e.yml
+      - .github/scripts/probe-gate.sh
+      - .github/scripts/test_probe_gate.sh
       - scripts/e2e/run-carelog-finance-dual-auth-e2e.sh
       - scripts/e2e/carelog-finance-dual-auth-e2e.mjs
   workflow_dispatch:
@@ -13,7 +15,7 @@ permissions:
   contents: read
 
 # Pins. FINANCE_EXPECTED_SHA must be an ancestor of the candidate (no history rewrite), and the cumulative
-# diff from it to the candidate must be exactly the three files in the paths filter above, all added.
+# diff from it to the candidate must be exactly the owned files in the paths filter above.
 # PLATFORM_SERVICES_* are pinned to the verified platform-services commit and its git tree.
 # CARELOG_ENROLLMENT_TARGET=stub: Carelog enrollment/claims are answered by an embedded synthetic stub,
 # not by carelog-be. Real carelog-be registration/enrollment is NOT verified by this job.
@@ -27,19 +29,21 @@ concurrency:
   group: carelog-finance-dual-auth-e2e-${{ github.ref }}
   cancel-in-progress: false
 
-# Verdict vocabulary (report-only; CI green is NOT transition approval):
-#   TOKEN_IN_UNPROTECTED_JOB=yes|no    from the unprotected job below. Only `no` can yield BOUNDARY=protected.
-#   BOUNDARY=protected|not_protected (...)|unapproved_sha
-#       protected requires: token_in_unprotected=no AND vars.APPROVED_PROBE_SHA == github.sha AND the job
-#       runs under environment dev-private-read (declared on dual-auth-e2e; the reviewer approval is the runtime proof).
-#   PROTECTED_CHECKOUT=ok|fail|skipped (...)   pinned private checkout of design-system; skipped when the approval pin is unapproved_sha or no pin is set.
-#   TRANSITION_EVIDENCE=protected | blocked reason=...
-#       protected requires BOUNDARY=protected AND platform-services is private (anonymous HTTP exactly 404 AND
-#       authenticated metadata private=true) AND resolve to the pinned SHA AND archive 200 AND tree match.
-#       Network errors or any other code block the transition.
+# Verdict vocabulary. All of these are report-only; the job never fails because of a verdict.
+#   TOKEN_IN_UNPROTECTED_JOB=yes|no   from the tokenless job. `no` is required before any approval is meaningful.
+#   APPROVED_SHA_MATCH=true|false     vars.APPROVED_PROBE_SHA non-empty AND == github.sha. Gates EVERY token-using
+#                                     step (authenticated download, PROTECTED_CHECKOUT, private transition checks).
+#   BOUNDARY=protected|not_protected (...)   token exposure only (token_in_unprotected must be no).
+#   PROTECTED_CHECKOUT=ok|fail|skipped (...) diagnostic: pinned private checkout of design-system. Needs
+#                                     APPROVED_SHA_MATCH and a valid PROBE_PRIVATE_REPO_SHA. No boundary requirement.
+#   PRE_TRANSITION_CHECK=ready|not_ready     tokenless summary of the inputs above. Not an approval.
+#   TRANSITION_EVIDENCE=protected|blocked reason=...
+#                                     POST-TRANSITION ACCEPTANCE ONLY. It is the approval criterion for the private
+#                                     switch, and it can only be protected after the platform-services move to
+#                                     private. Green CI is never transition approval.
 jobs:
-  # Unprotected and tiny: no environment, no checkout, no artifact. The only use of the secret is an emptiness
-  # comparison. The boolean is the only value that leaves the step.
+  # Tokenless. No environment, no secret, no artifact. It checks out the candidate only to run the gate regression
+  # test. The single use of the secret is an emptiness comparison whose boolean leaves the step.
   dual-auth-token-exposure-check:
     if: github.repository == 'ranikun-labs/finance-harness-be'
     runs-on: ubuntu-latest
@@ -47,6 +51,12 @@ jobs:
     outputs:
       token_in_unprotected: ${{ steps.tokcheck.outputs.token_in_unprotected }}
     steps:
+      - name: Check out candidate (no credentials persisted)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
       - name: Check read-token presence (boolean only, never used)
         id: tokcheck
         shell: bash
@@ -58,7 +68,12 @@ jobs:
           echo "TOKEN_IN_UNPROTECTED_JOB=$v"
           echo "token_in_unprotected=$v" >> "$GITHUB_OUTPUT"
 
-  # Protected: every use of RANIKUN_DEV_READ_TOKEN happens in this job, and only after reviewer approval.
+      - name: Gate regression test (tokenless)
+        shell: bash
+        run: bash .github/scripts/test_probe_gate.sh
+
+  # Protected. Every use of RANIKUN_DEV_READ_TOKEN is in this job, and only steps whose `if:` requires
+  # approved_sha_match. Waits for reviewer approval before any step runs.
   dual-auth-e2e:
     if: github.repository == 'ranikun-labs/finance-harness-be'
     needs: dual-auth-token-exposure-check
@@ -100,7 +115,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Runs first so the disclosure is recorded even when a later pin check fails closed.
           test "$CARELOG_ENROLLMENT_TARGET" = "stub"
           {
             echo '## Carelog enrollment'
@@ -113,21 +127,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Fail-closed. No history rewrite: the base only has to be an ancestor of the candidate.
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA" || {
             echo "FAIL-CLOSED: checked-out HEAD does not equal GITHUB_SHA."; exit 1; }
           git merge-base --is-ancestor "$FINANCE_EXPECTED_SHA" HEAD || {
             echo "FAIL-CLOSED: FINANCE_EXPECTED_SHA ($FINANCE_EXPECTED_SHA) is not an ancestor of the candidate."; exit 1; }
-          # Cumulative diff from the base: only additions, and exactly the three owned files.
           test -z "$(git diff --name-status "$FINANCE_EXPECTED_SHA" HEAD | awk '$1 != "A"')" || {
             echo "FAIL-CLOSED: candidate modifies, renames or deletes files relative to the base."; exit 1; }
           expected="$(printf '%s\n' \
+            .github/scripts/probe-gate.sh \
+            .github/scripts/test_probe_gate.sh \
             .github/workflows/carelog-finance-dual-auth-e2e.yml \
             scripts/e2e/carelog-finance-dual-auth-e2e.mjs \
             scripts/e2e/run-carelog-finance-dual-auth-e2e.sh | sort)"
           actual="$(git diff --name-only --no-renames "$FINANCE_EXPECTED_SHA" HEAD | sort)"
           test "$actual" = "$expected" || {
-            echo "FAIL-CLOSED: candidate file set differs from the three owned E2E files."; exit 1; }
+            echo "FAIL-CLOSED: candidate file set differs from the owned E2E files."; exit 1; }
           finance_tree="$(git rev-parse 'HEAD^{tree}')"
           printf 'finance_candidate_sha=%s\nfinance_candidate_tree=%s\nfinance_base_sha=%s\n' \
             "$GITHUB_SHA" "$finance_tree" "$FINANCE_EXPECTED_SHA" >> "$GITHUB_ENV"
@@ -141,7 +155,7 @@ jobs:
           [[ "$PLATFORM_SERVICES_TREE" =~ ^[0-9a-f]{40}$ ]] || {
             echo "FAIL-CLOSED: PLATFORM_SERVICES_TREE is not a 40-hex tree SHA."; exit 1; }
 
-      - name: Trust gate (defence in depth; the environment and protected branch are the real controls)
+      - name: Trust gate (defence in depth; environment and protected branch are the real controls)
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -157,42 +171,38 @@ jobs:
           [ "$REF" = "$trusted_ref" ] || { echo "FAIL-CLOSED: $EVENT_NAME from $REF is not the trusted ref." >&2; exit 1; }
           test "$(git rev-parse HEAD)" = "$SHA" || { echo "FAIL-CLOSED: HEAD does not equal GITHUB_SHA." >&2; exit 1; }
 
-      - name: Boundary verdict
-        id: boundary
+      # Tokenless. Evaluates the shared gate and publishes its outputs. No secret in this step.
+      - name: Gate decision (tokenless)
+        id: gate
         shell: bash
         env:
           TOKEN_IN_UNPROTECTED: ${{ needs.dual-auth-token-exposure-check.outputs.token_in_unprotected }}
           APPROVED_PROBE_SHA: ${{ vars.APPROVED_PROBE_SHA }}
           RUN_SHA: ${{ github.sha }}
+          PIN: ${{ vars.PROBE_PRIVATE_REPO_SHA }}
         run: |
           set -euo pipefail
-          # Boundary-breaking findings first, so the verdict names the real cause.
-          if [ "$TOKEN_IN_UNPROTECTED" = "yes" ]; then
-            b="not_protected (org/repo secret also provided)"
-          elif [ "$TOKEN_IN_UNPROTECTED" != "no" ]; then
-            b="not_protected (unprotected-job check missing)"
-          elif [ -z "$APPROVED_PROBE_SHA" ] || [ "$APPROVED_PROBE_SHA" != "$RUN_SHA" ]; then
-            b="unapproved_sha"
-          else
-            b="protected"
-          fi
-          echo "BOUNDARY=$b"
-          echo "- BOUNDARY=$b" >> "$GITHUB_STEP_SUMMARY"
-          case "$b" in
-            protected) v=protected ;;
-            unapproved_sha) v=unapproved_sha ;;
-            *) v=not_protected ;;
-          esac
-          echo "value=$v" >> "$GITHUB_OUTPUT"
+          # shellcheck source=/dev/null
+          source .github/scripts/probe-gate.sh
+          gate_decide "$TOKEN_IN_UNPROTECTED" "$APPROVED_PROBE_SHA" "$RUN_SHA" "$PIN" > "$RUNNER_TEMP/gate.env"
+          while IFS='=' read -r k v; do
+            echo "$k=$v" >> "$GITHUB_OUTPUT"
+          done < "$RUNNER_TEMP/gate.env"
+          rm -f "$RUNNER_TEMP/gate.env"
+          echo "TOKEN_IN_UNPROTECTED_JOB=$TOKEN_IN_UNPROTECTED"
+          echo "APPROVED_SHA_MATCH=$(sed -n 's/^approved_sha_match=//p' "$GITHUB_OUTPUT" | tail -1)"
+          echo "BOUNDARY=$(sed -n 's/^boundary=//p' "$GITHUB_OUTPUT" | tail -1)"
+          echo "- TOKEN_IN_UNPROTECTED_JOB=$TOKEN_IN_UNPROTECTED" >> "$GITHUB_STEP_SUMMARY"
 
-      # While platform-services is public, the anonymous fetch is used. The token is used only under a protected boundary.
-      - name: Download and verify pinned platform-services (anonymous, boundary not protected)
-        if: steps.boundary.outputs.value != 'protected'
+      # Authenticated download only when approved_sha_match. Otherwise anonymous (works while platform-services is public).
+      - name: Download and verify pinned platform-services (anonymous, approval not matched)
+        if: steps.gate.outputs.token_use != 'allowed'
         shell: bash
         run: |
           set -euo pipefail
           archive="$RUNNER_TEMP/platform-services.zip"
           unpack="$RUNNER_TEMP/platform-services"
+          trap 'rm -f "$archive"' EXIT
           curl --fail --silent --show-error --location \
             "https://codeload.github.com/ranikun-labs/platform-services/zip/$PLATFORM_SERVICES_SHA" \
             -o "$archive"
@@ -200,23 +210,22 @@ jobs:
           unzip -q "$archive" -d "$unpack"
           platform_dir="$(find "$unpack" -mindepth 1 -maxdepth 1 -type d -print -quit)"
           test -n "$platform_dir"
-          chmod +x "$platform_dir/gradlew"
           git -C "$platform_dir" init -q
           git -C "$platform_dir" add -f -A
           test "$(git -C "$platform_dir" write-tree)" = "$PLATFORM_SERVICES_TREE"
           echo "PLATFORM_SOURCE_DIR=$platform_dir" >> "$GITHUB_ENV"
-          rm -f "$archive"
 
-      - name: Download and verify pinned platform-services (token, boundary protected)
-        if: steps.boundary.outputs.value == 'protected'
+      - name: Download and verify pinned platform-services (token, approval matched)
+        if: steps.gate.outputs.token_use == 'allowed'
         shell: bash
         env:
           RANIKUN_DEV_READ_TOKEN: ${{ secrets.RANIKUN_DEV_READ_TOKEN }}
         run: |
           set -euo pipefail
-          # Token reaches curl only through a process-substitution config file, never argv or a printed line.
+          # The token reaches curl only through a process-substitution config file, never argv or output.
           archive="$RUNNER_TEMP/platform-services.zip"
           unpack="$RUNNER_TEMP/platform-services"
+          trap 'rm -f "$archive"' EXIT
           curl --fail --silent --show-error --location \
             --config <(printf 'header = "Authorization: Bearer %s"\n' "$RANIKUN_DEV_READ_TOKEN") \
             "https://codeload.github.com/ranikun-labs/platform-services/zip/$PLATFORM_SERVICES_SHA" \
@@ -225,30 +234,25 @@ jobs:
           unzip -q "$archive" -d "$unpack"
           platform_dir="$(find "$unpack" -mindepth 1 -maxdepth 1 -type d -print -quit)"
           test -n "$platform_dir"
-          chmod +x "$platform_dir/gradlew"
           git -C "$platform_dir" init -q
           git -C "$platform_dir" add -f -A
           test "$(git -C "$platform_dir" write-tree)" = "$PLATFORM_SERVICES_TREE"
           echo "PLATFORM_SOURCE_DIR=$platform_dir" >> "$GITHUB_ENV"
-          rm -f "$archive"
 
-      - name: Private transition check (report-only; CI green is not transition approval)
-        if: always() && steps.boundary.outputs.value != ''
+      # Token-using. Runs only when the transition is eligible (approval matched AND boundary protected).
+      # Output is written to GITHUB_OUTPUT; the verdict line is printed by the tokenless step below.
+      - name: Private transition checks (token; runs only when eligible)
+        id: priv
+        if: steps.gate.outputs.transition_eligible == 'yes'
         shell: bash
         env:
-          BOUNDARY: ${{ steps.boundary.outputs.value }}
           RANIKUN_DEV_READ_TOKEN: ${{ secrets.RANIKUN_DEV_READ_TOKEN }}
         run: |
           set -uo pipefail
           work="$(mktemp -d "$RUNNER_TEMP/transition.XXXXXX")"
           trap 'rm -rf "$work"' EXIT
           auth_cfg() { printf 'header = "Authorization: Bearer %s"\n' "$RANIKUN_DEV_READ_TOKEN"; }
-          block() {
-            echo "TRANSITION_EVIDENCE=blocked reason=$1"
-            echo "- transition=blocked (reason: $1)" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          }
-          [ "$BOUNDARY" = "protected" ] || block "boundary:$BOUNDARY"
+          block() { echo "transition=blocked" >> "$GITHUB_OUTPUT"; echo "transition_reason=$1" >> "$GITHUB_OUTPUT"; exit 0; }
 
           # Public-vs-private: anonymous must be exactly 404, and authenticated metadata must say private=true.
           anon="$(curl -s -o /dev/null -w '%{http_code}' https://api.github.com/repos/ranikun-labs/platform-services 2>/dev/null)" || anon=000
@@ -262,8 +266,7 @@ jobs:
             -H 'Accept: application/vnd.github+json' \
             "https://api.github.com/repos/ranikun-labs/platform-services/commits/$PLATFORM_SERVICES_SHA" 2>/dev/null)" || res=000
           resolved="$(jq -r '.sha // empty' "$work/commit.json" 2>/dev/null || true)"
-          sha_match=fail; [ "$resolved" = "$PLATFORM_SERVICES_SHA" ] && sha_match=ok
-          [ "$res" = "200" ] && [ "$sha_match" = ok ] || block "resolve_http_${res}_sha_${sha_match}"
+          [ "$res" = "200" ] && [ "$resolved" = "$PLATFORM_SERVICES_SHA" ] || block "resolve_http_${res}"
 
           dl="$(curl -s -o "$work/p.zip" -w '%{http_code}' --location --config <(auth_cfg) \
             "https://codeload.github.com/ranikun-labs/platform-services/zip/$PLATFORM_SERVICES_SHA" 2>/dev/null)" || dl=000
@@ -276,38 +279,55 @@ jobs:
               [ "$(git -C "$pdir" write-tree 2>/dev/null || true)" = "$PLATFORM_SERVICES_TREE" ] && tree_match=ok
             fi
           fi
-          line="REPO=platform-services ANON=$anon META_HTTP=$meta PRIVATE=$priv RESOLVE_HTTP=$res SHA_MATCH=$sha_match DOWNLOAD_HTTP=$dl TREE_MATCH=$tree_match"
-          echo "$line"; echo "- $line" >> "$GITHUB_STEP_SUMMARY"
+          echo "REPO=platform-services ANON=$anon META_HTTP=$meta PRIVATE=$priv RESOLVE_HTTP=$res DOWNLOAD_HTTP=$dl TREE_MATCH=$tree_match"
           [ "$dl" = "200" ] && [ "$tree_match" = ok ] || block "archive_http_${dl}_tree_${tree_match}"
-          echo "TRANSITION_EVIDENCE=protected"
-          echo "- transition=protected (CI green alone is not approval; this line is the approval criterion)" >> "$GITHUB_STEP_SUMMARY"
+          echo "transition=protected" >> "$GITHUB_OUTPUT"
 
-      - name: Pinned private checkout proof (decide)
-        id: pin
+      # Tokenless verdict. Prints exactly one TRANSITION_EVIDENCE line.
+      - name: Transition verdict (post-transition acceptance only)
         if: always()
         shell: bash
         env:
-          BOUNDARY: ${{ steps.boundary.outputs.value }}
+          ELIGIBLE: ${{ steps.gate.outputs.transition_eligible }}
+          GATE_REASON: ${{ steps.gate.outputs.transition_block_reason }}
+          PRIV_OUTCOME: ${{ steps.priv.outputs.transition }}
+          PRIV_REASON: ${{ steps.priv.outputs.transition_reason }}
+        run: |
+          set -uo pipefail
+          if [ "$ELIGIBLE" != "yes" ]; then
+            v="blocked reason=${GATE_REASON:-gate_unknown}"
+          elif [ "$PRIV_OUTCOME" = "protected" ]; then
+            v="protected"
+          else
+            v="blocked reason=${PRIV_REASON:-private_check_not_run}"
+          fi
+          echo "TRANSITION_EVIDENCE=$v"
+          echo "- TRANSITION_EVIDENCE=$v (post-transition acceptance only; green CI is not approval)" >> "$GITHUB_STEP_SUMMARY"
+
+      # Tokenless. Decides whether the pinned checkout runs, and prints the skip reason when it does not.
+      - name: Protected checkout decision (tokenless)
+        id: checkdec
+        if: always()
+        shell: bash
+        env:
+          CHECKOUT_GO: ${{ steps.gate.outputs.checkout_go }}
+          AM: ${{ steps.gate.outputs.approved_sha_match }}
           PIN: ${{ vars.PROBE_PRIVATE_REPO_SHA }}
         run: |
           set -uo pipefail
-          # Gated on the approval pin only. The approved job already waits for reviewer approval; the transition
-          # verdict (not this proof) is what requires BOUNDARY=protected.
-          if [ "$BOUNDARY" = "unapproved_sha" ]; then
-            echo "PROTECTED_CHECKOUT=skipped (unapproved_sha)"
-            echo "go=no" >> "$GITHUB_OUTPUT"
-          elif [ -z "$PIN" ]; then
-            echo "PROTECTED_CHECKOUT=skipped (no pinned sha)"
-            echo "go=no" >> "$GITHUB_OUTPUT"
-          elif [[ "$PIN" =~ ^[0-9a-f]{40}$ ]]; then
+          if [ "$CHECKOUT_GO" = "yes" ]; then
             echo "go=yes" >> "$GITHUB_OUTPUT"
           else
-            echo "PROTECTED_CHECKOUT=fail (pin is not a 40-hex SHA)"
-            exit 1
+            if [ "$AM" != "true" ]; then r="unapproved_sha"
+            elif [ -z "$PIN" ]; then r="no pinned sha"
+            else r="invalid pinned sha"; fi
+            echo "PROTECTED_CHECKOUT=skipped ($r)"
+            echo "- PROTECTED_CHECKOUT=skipped ($r)" >> "$GITHUB_STEP_SUMMARY"
+            echo "go=no" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Pinned private checkout of design-system (protected)
-        if: steps.pin.outputs.go == 'yes'
+      - name: Pinned private checkout of design-system (token; approval matched and pin valid)
+        if: steps.checkdec.outputs.go == 'yes'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: ranikun-labs/design-system
@@ -316,19 +336,22 @@ jobs:
           token: ${{ secrets.RANIKUN_DEV_READ_TOKEN }}
           persist-credentials: false
 
-      - name: Verify pinned private checkout HEAD
-        if: steps.pin.outputs.go == 'yes'
+      - name: Verify pinned private checkout HEAD (tokenless)
+        id: checkres
+        if: steps.checkdec.outputs.go == 'yes'
         shell: bash
         env:
           PIN: ${{ vars.PROBE_PRIVATE_REPO_SHA }}
         run: |
-          set -euo pipefail
-          head_sha="$(git -C _probe/design-system rev-parse HEAD)"
+          set -uo pipefail
+          head_sha="$(git -C _probe/design-system rev-parse HEAD 2>/dev/null || true)"
           if [ "$head_sha" = "$PIN" ]; then
             echo "PROTECTED_CHECKOUT=ok"
             echo "- PROTECTED_CHECKOUT=ok" >> "$GITHUB_STEP_SUMMARY"
+            echo "result=ok" >> "$GITHUB_OUTPUT"
           else
             echo "PROTECTED_CHECKOUT=fail (HEAD does not equal pin)"
+            echo "result=fail" >> "$GITHUB_OUTPUT"
             exit 1
           fi
 
@@ -336,6 +359,25 @@ jobs:
         if: always()
         shell: bash
         run: rm -rf _probe
+
+      # Tokenless summary of the pre-transition inputs. Not an approval; it does not authorise the transition.
+      - name: Pre-transition check (tokenless summary)
+        if: always()
+        shell: bash
+        env:
+          TOKEN_IN_UNPROTECTED: ${{ needs.dual-auth-token-exposure-check.outputs.token_in_unprotected }}
+          AM: ${{ steps.gate.outputs.approved_sha_match }}
+          CHECK: ${{ steps.checkres.outputs.result }}
+        run: |
+          set -uo pipefail
+          chk="${CHECK:-skipped}"
+          if [ "$TOKEN_IN_UNPROTECTED" = "no" ] && [ "$AM" = "true" ] && [ "$chk" = "ok" ]; then
+            v=ready
+          else
+            v="not_ready (token_in_unprotected=${TOKEN_IN_UNPROTECTED:-unknown}, approved_sha_match=${AM:-unknown}, protected_checkout=$chk)"
+          fi
+          echo "PRE_TRANSITION_CHECK=$v"
+          echo "- PRE_TRANSITION_CHECK=$v (inputs only; not transition approval)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up JDK 17 (Gateway) and JDK 21 (Core, Finance)
         uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
@@ -356,10 +398,18 @@ jobs:
             echo "- Platform-services: \`$PLATFORM_SERVICES_SHA\` (tree \`$PLATFORM_SERVICES_TREE\`)"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # The run step gets no token. Candidate code cannot read the secret from this step.
+      # No token in the run step. Candidate code cannot read the secret here.
       - name: Run Carelog x Finance dual-auth flows
         shell: bash
         run: >-
           ./scripts/e2e/run-carelog-finance-dual-auth-e2e.sh
           "$GITHUB_WORKSPACE"
           "$PLATFORM_SOURCE_DIR"
+
+      - name: Remove extracted platform-services source
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          if [ -n "${PLATFORM_SOURCE_DIR:-}" ]; then rm -rf "$PLATFORM_SOURCE_DIR"; fi
+          rm -rf "$RUNNER_TEMP/platform-services" "$RUNNER_TEMP/platform-services.zip"
