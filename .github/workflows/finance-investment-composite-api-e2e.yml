@@ -15,6 +15,8 @@ concurrency:
 jobs:
   disposable-composite-e2e:
     if: github.repository == 'ranikun-labs/finance-harness-be' && github.ref == 'refs/heads/main'
+    # The read token is provided only through this environment (deployment branches: main; required reviewer).
+    environment: dev-private-read
     runs-on: ubuntu-latest
     timeout-minutes: 35
     services:
@@ -63,7 +65,7 @@ jobs:
           set -euo pipefail
           # Presence check only. The value is never echoed.
           if [ -z "${RANIKUN_DEV_READ_TOKEN:-}" ]; then
-            echo "RANIKUN_DEV_READ_TOKEN missing: set org secret or repo secret" >&2
+            echo "RANIKUN_DEV_READ_TOKEN missing: set environment secret in dev-private-read" >&2
             exit 1
           fi
       - name: Check out merged Core and Gateway
