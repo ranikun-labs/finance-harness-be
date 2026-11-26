@@ -232,6 +232,9 @@ class OutputRejectionRuleReproTest {
         )
 
         assertOneRejectionLine(run, OutputRejectionRule.VALIDATOR_EXCEPTION)
+        assertThat(appender.list.single().throwableProxy)
+            .`as`("diagnostic event must not carry a throwable")
+            .isNull()
         assertThat(run.allLogs.joinToString("\n"))
             .doesNotContain(syntheticKey, syntheticQuestion, syntheticAnswer, "validator failed")
     }
