@@ -117,13 +117,32 @@ jobs:
             exit 1
           }
 
+      - name: Verify RANIKUN_DEV_READ_TOKEN is configured
+        # Trusted events only (push to this branch, or manual dispatch). Forks and pull_request runs never get the token.
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          RANIKUN_DEV_READ_TOKEN: ${{ secrets.RANIKUN_DEV_READ_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Presence check only. The value is never echoed.
+          if [ -z "${RANIKUN_DEV_READ_TOKEN:-}" ]; then
+            echo "RANIKUN_DEV_READ_TOKEN missing: set org secret or repo secret" >&2
+            exit 1
+          fi
+
       - name: Download and verify pinned platform-services source
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          RANIKUN_DEV_READ_TOKEN: ${{ secrets.RANIKUN_DEV_READ_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
           archive="$RUNNER_TEMP/platform-services.zip"
           unpack="$RUNNER_TEMP/platform-services"
+          # Header is fed via process substitution so the token never appears in argv.
           curl --fail --silent --show-error --location \
+            --config <(printf 'header = "Authorization: Bearer %s"\n' "$RANIKUN_DEV_READ_TOKEN") \
             "https://codeload.github.com/ranikun-labs/platform-services/zip/$PLATFORM_SERVICES_SHA" \
             -o "$archive"
           mkdir -p "$unpack"
