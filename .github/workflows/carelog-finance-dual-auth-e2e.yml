@@ -28,12 +28,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Main E2E. Holds NO secret. Every input it needs is public (platform-services is fetched anonymously and
-  # verified by tree), so a compromised candidate workflow cannot read a token from this job.
+  # Main E2E. No environment, so no reviewer gate. platform-services is fetched anonymously and verified by tree.
+  # The read token is NOT used here. The only token-related step only records whether the secret resolves in this
+  # unprotected job (a boolean), so the probe job can tell whether the secret is also reachable from here.
   dual-auth-e2e:
     if: github.repository == 'ranikun-labs/finance-harness-be'
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    outputs:
+      token_in_unprotected: ${{ steps.tokcheck.outputs.token_in_unprotected }}
     services:
       postgres:
         image: postgres:18.4-alpine3.24
@@ -64,6 +67,18 @@ jobs:
           # Full history so FINANCE_EXPECTED_SHA (an ancestor, not necessarily HEAD^) is present for the pin check.
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Check read-token presence in this unprotected job (boolean only, never used)
+        id: tokcheck
+        shell: bash
+        env:
+          # Only a boolean is taken from the expression. The secret value itself is not passed to any step.
+          HAS_READ_TOKEN: ${{ secrets.RANIKUN_DEV_READ_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          if [ "$HAS_READ_TOKEN" = "true" ]; then v=yes; else v=no; fi
+          echo "TOKEN_IN_UNPROTECTED_JOB=$v"
+          echo "token_in_unprotected=$v" >> "$GITHUB_OUTPUT"
 
       - name: Record Carelog enrollment disclosure
         shell: bash
@@ -110,7 +125,7 @@ jobs:
           [[ "$PLATFORM_SERVICES_TREE" =~ ^[0-9a-f]{40}$ ]] || {
             echo "FAIL-CLOSED: PLATFORM_SERVICES_TREE is not a 40-hex tree SHA."; exit 1; }
 
-      # Anonymous fetch: platform-services is public. No token is sent from this job.
+      # Anonymous fetch: platform-services is fetched without a token in this job.
       - name: Download and verify pinned platform-services source
         shell: bash
         run: |
@@ -159,19 +174,23 @@ jobs:
           "$GITHUB_WORKSPACE"
           "$PLATFORM_SOURCE_DIR"
 
-  # Private read probe. Runs ONLY under the `dev-private-read` environment, which the Owner configures with
-  # a deployment branch policy (trusted candidate branch only), required reviewers, and an environment-scoped
-  # secret DEV_PRIVATE_READ_TOKEN. Verdict semantics:
-  #   TRANSITION_EVIDENCE=protected          -> probe ran under the protected environment and passed.
-  #   TRANSITION_EVIDENCE=unavailable (...)  -> environment secret not provided; no evidence.
-  #   TRANSITION_EVIDENCE=failed (...)       -> environment secret present but a probe check failed.
-  # Only runs under the protected environment count for the Private-switch decision. Runs on unprotected
-  # branches are excluded, even when they print `protected`. The job does NOT gate or block the main E2E
-  # (no `needs:` edge), so waiting for reviewer approval never blocks E2E.
-  # The secret is named DEV_PRIVATE_READ_TOKEN (not RANIKUN_DEV_READ_TOKEN) so that GitHub cannot fall back to a
-  # repo/org secret of the same name inside this job. Token only reaches curl via --config process substitution.
+  # Private read probe. Runs under the `dev-private-read` environment (Owner configures: deployment branch policy
+  # limited to the candidate branch, required reviewers, environment secret RANIKUN_DEV_READ_TOKEN, and environment
+  # variable APPROVED_PROBE_SHA = the reviewed commit SHA). Environment settings live outside the candidate branch,
+  # so the candidate cannot change them. Verdict rules, all must hold for TRANSITION_EVIDENCE=protected:
+  #   BOUNDARY=protected  requires: (a) this job runs under environment dev-private-read (declared below; the
+  #     required-reviewer approval is the runtime proof); (b) vars.APPROVED_PROBE_SHA equals github.sha;
+  #     (c) dual-auth-e2e reported TOKEN_IN_UNPROTECTED_JOB=no, i.e. no repo/org copy of the secret is reachable.
+  #   Otherwise BOUNDARY is unapproved_sha or not_protected, and the token is never used.
+  #   TRANSITION_EVIDENCE=protected requires BOUNDARY=protected AND the private platform-services check passes
+  #   (not public, resolve 200 to the pinned SHA, archive download 200, git tree equals the pinned tree).
+  #   Anything else prints TRANSITION_EVIDENCE=blocked reason=... and the job exits 0 (report-only).
+  # Only runs under the protected environment count for the Private-switch decision.
+  # The APPROVED_PROBE_SHA pin cannot live in the workflow file itself: a commit cannot contain its own SHA, so the
+  # approval is held as an environment variable that only the Owner can set.
   private-read-probe:
-    if: github.repository == 'ranikun-labs/finance-harness-be'
+    if: ${{ always() && github.repository == 'ranikun-labs/finance-harness-be' }}
+    needs: dual-auth-e2e
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: dev-private-read
@@ -180,14 +199,13 @@ jobs:
       cancel-in-progress: false
     steps:
       # Trust gate. Candidate-editable, so it is defence in depth only. The enforcing controls are the
-      # environment deployment branch policy and the protected trusted branch (see the PR body).
+      # environment deployment branch policy, required reviewers, and the protected candidate branch.
       - name: Gate read token to trusted branch events
         id: gate
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
           REF: ${{ github.ref }}
-          SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           trusted_ref='refs/heads/claude/great-heisenberg-u3i75y'
@@ -200,87 +218,95 @@ jobs:
             exit 1
           fi
 
-      - name: Check out candidate (pinned to triggering SHA, no credentials persisted)
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-
-      - name: Private read probe
+      - name: Private read probe and boundary verdict
         id: probe
         shell: bash
         env:
-          DEV_PRIVATE_READ_TOKEN: ${{ secrets.DEV_PRIVATE_READ_TOKEN }}
+          RANIKUN_DEV_READ_TOKEN: ${{ secrets.RANIKUN_DEV_READ_TOKEN }}
+          APPROVED_PROBE_SHA: ${{ vars.APPROVED_PROBE_SHA }}
+          TOKEN_IN_UNPROTECTED: ${{ needs.dual-auth-e2e.outputs.token_in_unprotected }}
+          RUN_SHA: ${{ github.sha }}
           PLATFORM_SERVICES_SHA: ${{ env.PLATFORM_SERVICES_SHA }}
           PLATFORM_SERVICES_TREE: ${{ env.PLATFORM_SERVICES_TREE }}
         run: |
           set -uo pipefail
-          # Never enable tracing here. Bodies and the token are never printed.
+          # Never enable tracing here. Bodies and the token are never printed; only codes and fixed words are.
           work="$(mktemp -d "$RUNNER_TEMP/private-probe.XXXXXX")"
           trap 'rm -rf "$work"' EXIT
-          # Token only ever reaches curl through a process-substitution config file, never argv.
-          auth_cfg() { printf 'header = "Authorization: Bearer %s"\n' "$DEV_PRIVATE_READ_TOKEN"; }
+          # The token reaches curl only through a process-substitution config file, never argv.
+          auth_cfg() { printf 'header = "Authorization: Bearer %s"\n' "$RANIKUN_DEV_READ_TOKEN"; }
 
-          if [ -z "${DEV_PRIVATE_READ_TOKEN:-}" ]; then
-            echo "TRANSITION_EVIDENCE=unavailable (environment secret not provided)"
-            echo "- TRANSITION_EVIDENCE=unavailable (environment secret not provided)" >> "$GITHUB_STEP_SUMMARY"
+          # ---- Boundary verdict (checks a, b, c) ----
+          if [ -z "$APPROVED_PROBE_SHA" ] || [ "$APPROVED_PROBE_SHA" != "$RUN_SHA" ]; then
+            boundary="unapproved_sha"
+          elif [ "$TOKEN_IN_UNPROTECTED" = "yes" ]; then
+            boundary="not_protected (org/repo secret also provided)"
+          elif [ "$TOKEN_IN_UNPROTECTED" != "no" ]; then
+            boundary="not_protected (unprotected-job check missing)"
+          else
+            boundary="protected"
+          fi
+          echo "BOUNDARY=$boundary"
+          echo "- BOUNDARY=$boundary" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$boundary" != "protected" ]; then
+            # Token is never used unless the boundary is protected.
+            echo "TRANSITION_EVIDENCE=blocked reason=boundary:${boundary%% *}"
+            echo "- transition=blocked (boundary: $boundary)" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
-          overall=ok
-          probe_repo() {
-            local repo="$1" name anon res_http dl_http sha tmp archive status line key
-            name="${repo#ranikun-labs/}"
-            key="${name//-/_}"
-            anon="$(curl -s -o /dev/null -w '%{http_code}' "https://api.github.com/repos/$repo" 2>/dev/null)" || anon=000
-            tmp="$work/$name.json"
-            res_http="$(curl -s -o "$tmp" -w '%{http_code}' --config <(auth_cfg) \
-              -H 'Accept: application/vnd.github+json' \
-              "https://api.github.com/repos/$repo/commits/HEAD" 2>/dev/null)" || res_http=000
-            sha="$(jq -r '.sha // empty' "$tmp" 2>/dev/null || true)"
-            dl_http=000; status=fail
-            if [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
-              archive="$work/$name.tar.gz"
-              dl_http="$(curl -s -o "$archive" -w '%{http_code}' --location --config <(auth_cfg) \
-                "https://codeload.github.com/$repo/tar.gz/$sha" 2>/dev/null)" || dl_http=000
-              if [ "$dl_http" = "200" ] && gzip -t "$archive" >/dev/null 2>&1; then status=ok; fi
-            fi
-            [ "$status" = ok ] || overall=fail
-            line="REPO=$name ANON=$anon RESOLVE_HTTP=$res_http DOWNLOAD_HTTP=$dl_http PRIVATE_AUTH=$status"
-            if [ "$status" = ok ]; then line="$line SHA=${sha:0:7}"; fi
-            echo "$line"
-            echo "- $line" >> "$GITHUB_STEP_SUMMARY"
-          }
+          # ---- Private checks ----
+          reason=""
+          if [ -z "${RANIKUN_DEV_READ_TOKEN:-}" ]; then
+            reason="token_not_provided"
+          fi
 
-          # Private platform-services: the same pinned zip and tree check the main job does anonymously.
-          pinned_tree_check() {
-            local archive="$work/platform-services.zip" unpack="$work/platform-services" pdir tree
-            local code
-            code="$(curl -s -o "$archive" -w '%{http_code}' --location --config <(auth_cfg) \
-              "https://codeload.github.com/ranikun-labs/platform-services/zip/$PLATFORM_SERVICES_SHA" 2>/dev/null)" || code=000
-            if [ "$code" = "200" ]; then
-              mkdir -p "$unpack" && unzip -q "$archive" -d "$unpack" 2>/dev/null || true
+          if [ -z "$reason" ]; then
+            anon="$(curl -s -o /dev/null -w '%{http_code}' https://api.github.com/repos/ranikun-labs/platform-services 2>/dev/null)" || anon=000
+            res_http="$(curl -s -o "$work/commit.json" -w '%{http_code}' --config <(auth_cfg) \
+              -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/ranikun-labs/platform-services/commits/$PLATFORM_SERVICES_SHA" 2>/dev/null)" || res_http=000
+            resolved="$(jq -r '.sha // empty' "$work/commit.json" 2>/dev/null || true)"
+            rm -f "$work/commit.json"
+            sha_match=fail; [ "$resolved" = "$PLATFORM_SERVICES_SHA" ] && sha_match=ok
+            dl_http=000; tree_match=fail
+            archive="$work/platform-services.zip"
+            dl_http="$(curl -s -o "$archive" -w '%{http_code}' --location --config <(auth_cfg) \
+              "https://codeload.github.com/ranikun-labs/platform-services/zip/$PLATFORM_SERVICES_SHA" 2>/dev/null)" || dl_http=000
+            if [ "$dl_http" = "200" ]; then
+              unpack="$work/platform-services"; mkdir -p "$unpack"
+              unzip -q "$archive" -d "$unpack" 2>/dev/null || true
               pdir="$(find "$unpack" -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null)"
               if [ -n "$pdir" ]; then
-                git -C "$pdir" init -q && git -C "$pdir" add -f -A && tree="$(git -C "$pdir" write-tree)"
-                if [ "$tree" = "$PLATFORM_SERVICES_TREE" ]; then
-                  echo "PINNED_TREE=platform-services:ok"; return 0
-                fi
+                git -C "$pdir" init -q && git -C "$pdir" add -f -A
+                tree="$(git -C "$pdir" write-tree 2>/dev/null || true)"
+                [ "$tree" = "$PLATFORM_SERVICES_TREE" ] && tree_match=ok
               fi
             fi
-            echo "PINNED_TREE=platform-services:fail (http=$code)"; return 1
-          }
-
-          probe_repo 'ranikun-labs/design-system'
-          probe_repo 'ranikun-labs/shared-ai-fastapi-poc'
-          pinned_tree_check || overall=fail
-
-          if [ "$overall" = ok ]; then
-            echo "TRANSITION_EVIDENCE=protected"
-            echo "- TRANSITION_EVIDENCE=protected" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "TRANSITION_EVIDENCE=failed (a probe check did not pass)"
-            echo "- TRANSITION_EVIDENCE=failed (a probe check did not pass)" >> "$GITHUB_STEP_SUMMARY"
+            rm -rf "$work/platform-services" "$archive"
+            line="REPO=platform-services ANON=$anon RESOLVE_HTTP=$res_http DOWNLOAD_HTTP=$dl_http SHA_MATCH=$sha_match TREE_MATCH=$tree_match"
+            echo "$line"; echo "- $line" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$anon" = "200" ]; then reason="target_repo_is_public_not_a_private_read"
+            elif [ "$res_http" != "200" ] || [ "$sha_match" != ok ]; then reason="resolve_failed_or_sha_mismatch"
+            elif [ "$dl_http" != "200" ] || [ "$tree_match" != ok ]; then reason="archive_or_tree_mismatch"
+            fi
           fi
-          # Report-only: the verdict line is the signal, the job does not fail the workflow.
+
+          # Informational only (unpinned, not gating): HEAD resolve status of the other private repos.
+          for r in design-system shared-ai-fastapi-poc; do
+            code="$(curl -s -o "$work/i.json" -w '%{http_code}' --config <(auth_cfg) \
+              -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/ranikun-labs/$r/commits/HEAD" 2>/dev/null)" || code=000
+            echo "INFO REPO=$r RESOLVE_HTTP=$code (unpinned, not gating)"
+            rm -f "$work/i.json"
+          done
+
+          if [ -z "$reason" ]; then
+            echo "TRANSITION_EVIDENCE=protected"
+            echo "- transition=protected" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "TRANSITION_EVIDENCE=blocked reason=$reason"
+            echo "- transition=blocked (reason: $reason)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # Report-only: verdict lines are the signal; the job does not fail the workflow.
           exit 0
