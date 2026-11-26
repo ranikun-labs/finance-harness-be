@@ -237,12 +237,13 @@ jobs:
           auth_cfg() { printf 'header = "Authorization: Bearer %s"\n' "$RANIKUN_DEV_READ_TOKEN"; }
 
           # ---- Boundary verdict (checks a, b, c) ----
-          if [ -z "$APPROVED_PROBE_SHA" ] || [ "$APPROVED_PROBE_SHA" != "$RUN_SHA" ]; then
-            boundary="unapproved_sha"
-          elif [ "$TOKEN_IN_UNPROTECTED" = "yes" ]; then
+          # Boundary-breaking findings are reported before the approval-pin finding, so the verdict names the real cause.
+          if [ "$TOKEN_IN_UNPROTECTED" = "yes" ]; then
             boundary="not_protected (org/repo secret also provided)"
           elif [ "$TOKEN_IN_UNPROTECTED" != "no" ]; then
             boundary="not_protected (unprotected-job check missing)"
+          elif [ -z "$APPROVED_PROBE_SHA" ] || [ "$APPROVED_PROBE_SHA" != "$RUN_SHA" ]; then
+            boundary="unapproved_sha"
           else
             boundary="protected"
           fi
