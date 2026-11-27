@@ -14,7 +14,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 
-@RestControllerAdvice(assignableTypes = [GeneralAnalysisController::class])
+@RestControllerAdvice(assignableTypes = [GeneralAnalysisController::class, LocalFakeGeneralAnalysisController::class])
 @Profile("!prod & !production & (local | test)")
 class GeneralAnalysisApiExceptionHandler {
     @ExceptionHandler(

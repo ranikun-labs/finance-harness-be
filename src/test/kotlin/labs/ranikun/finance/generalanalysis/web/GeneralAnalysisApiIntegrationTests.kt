@@ -33,6 +33,22 @@ class GeneralAnalysisApiIntegrationTests {
     lateinit var jdbcTemplate: JdbcTemplate
 
     @Test
+    fun fakeEndpointUsesExistingPolicyAndDeterministicExecution() {
+        val question = jsonMapper.readTree(mockMvc.perform(
+            post("/finance/local-fake-analysis/questions").contentType(MediaType.APPLICATION_JSON)
+                .content(jsonMapper.writeValueAsBytes(mapOf("question" to "How do I check this information?"))),
+        ).andExpect(status().isCreated).andReturn().response.contentAsString)
+        val questionId = question.path("questionId").asText()
+        val checklistId = question.path("checklistId").asText()
+        mockMvc.perform(put("/finance/local-fake-analysis/questions/{questionId}/checklists/{checklistId}", questionId, checklistId)
+            .contentType(MediaType.APPLICATION_JSON).content(jsonMapper.writeValueAsBytes(mapOf("checkedItemIds" to emptyList<String>(), "confirmed" to true))))
+            .andExpect(status().isOk)
+        mockMvc.perform(post("/finance/local-fake-analysis/questions/{questionId}/analysis", questionId)
+            .contentType(MediaType.APPLICATION_JSON).content(jsonMapper.writeValueAsBytes(mapOf("checklistId" to checklistId))))
+            .andExpect(status().isOk).andExpect(jsonPath("$.status").value("COMPLETED"))
+    }
+
+    @Test
     fun successfulAnalysisDoesNotCreateJournal() {
         val journalCountBefore = jdbcTemplate.queryForObject("select count(*) from journals", Long::class.java)!!
         val questionResponse = mockMvc.perform(
