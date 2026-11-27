@@ -1,0 +1,12 @@
+spring:
+  config:
+    activate:
+      on-profile: dev
+
+# DEV receiver for the Gateway trusted-context envelope. The caller value is injected at runtime;
+# it is never committed. Startup fails when FINANCE_TRUSTED_CONTEXT_SERVICE_SECRET is absent or too short.
+finance:
+  auth:
+    mode: trusted-context
+    trusted-context:
+      service-secret: ${FINANCE_TRUSTED_CONTEXT_SERVICE_SECRET:}

@@ -11,6 +11,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException
 import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.servlet.resource.NoResourceFoundException
 
 data class JournalFieldError(
     val field: String,
@@ -79,6 +80,17 @@ class JournalApiExceptionHandler {
 
     @ExceptionHandler(HttpMessageNotReadableException::class)
     fun handleUnreadableRequest(): ResponseEntity<JournalErrorResponse> = invalidRequest(emptyList())
+
+    @ExceptionHandler(NoResourceFoundException::class)
+    fun handleNoResource(): ResponseEntity<JournalErrorResponse> =
+        ResponseEntity.status(HttpStatus.NOT_FOUND).body(
+            JournalErrorResponse(
+                code = "not_found",
+                message = "Resource not found.",
+                requestId = requestId(),
+                fieldErrors = emptyList(),
+            ),
+        )
 
     @ExceptionHandler(Exception::class)
     fun handleUnexpected(exception: Exception): ResponseEntity<JournalErrorResponse> {

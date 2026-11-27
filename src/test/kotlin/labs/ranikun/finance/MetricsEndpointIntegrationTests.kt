@@ -50,10 +50,10 @@ class MetricsEndpointIntegrationTests {
         val applicationPort = environment.getRequiredProperty("local.server.port").toInt()
         val sensitivePath = "/__finance_metrics_private_path_7f31__/account-54981023"
         val applicationResponse = get("http://127.0.0.1:$applicationPort$sensitivePath")
-        assertThat(applicationResponse.statusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR.value())
+        assertThat(applicationResponse.statusCode()).isEqualTo(HttpStatus.NOT_FOUND.value())
 
         val publicMetricsResponse = get("http://127.0.0.1:$applicationPort/actuator/prometheus")
-        assertThat(publicMetricsResponse.statusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR.value())
+        assertThat(publicMetricsResponse.statusCode()).isEqualTo(HttpStatus.NOT_FOUND.value())
         assertThat(publicMetricsResponse.body()).doesNotContain("http_server_requests")
         assertThat(get("http://127.0.0.1:$applicationPort/finance/journals/00000000-0000-0000-0000-000000000000").statusCode())
             .isEqualTo(HttpStatus.NOT_FOUND.value())
@@ -97,11 +97,11 @@ class MetricsEndpointIntegrationTests {
         assertThat(get("http://127.0.0.1:$management/actuator/health/readiness").statusCode()).isEqualTo(200)
         assertThat(get("http://127.0.0.1:$app/__metrics-test/failure").statusCode()).isEqualTo(500)
         assertThat(get("http://127.0.0.1:$app/__finance_metrics_private_path_7f31__/account-54981023").statusCode())
-            .isEqualTo(500)
+            .isEqualTo(404)
         assertThat(get("http://127.0.0.1:$app/finance/journals/00000000-0000-0000-0000-000000000000").statusCode())
             .isEqualTo(404)
         val publicMetricsResponse = get("http://127.0.0.1:$app/actuator/prometheus")
-        assertThat(publicMetricsResponse.statusCode()).isEqualTo(500)
+        assertThat(publicMetricsResponse.statusCode()).isEqualTo(404)
         assertThat(publicMetricsResponse.body()).doesNotContain("http_server_requests")
 
         val metrics = get("http://127.0.0.1:$management/actuator/prometheus").body()
