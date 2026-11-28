@@ -2,7 +2,7 @@ name: Finance DEV release PR validation
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - .github/workflows/dev-release.yml
       - .github/workflows/dev-release-pr-ci.yml
