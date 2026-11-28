@@ -64,10 +64,11 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ranikun-labs/platform-infra/.github/workflows/dev-ecs-release.yml@fdeb22805d9f26779073dc68c6f0a9a166ccb884
+    uses: ranikun-labs/platform-infra/.github/workflows/dev-ecs-release.yml@4cf8bfedd7454be3a314b22a165d2555fc096fe2
     with:
       service: finance
       dockerfile: Dockerfile
       context: .
       deploy_enabled: ${{ github.event_name == 'push' || inputs.deploy_enabled }}
       test_sha: ${{ github.sha }}
+      require_current_dev_tip: ${{ github.event_name == 'push' }}
