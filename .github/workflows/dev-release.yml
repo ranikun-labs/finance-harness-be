@@ -1,6 +1,8 @@
 name: Finance DEV release
 
 on:
+  push:
+    branches: [dev]
   workflow_dispatch:
     inputs:
       deploy_enabled:
@@ -12,8 +14,31 @@ on:
 permissions: {}
 
 jobs:
+  auto-release-gate:
+    if: github.event_name == 'push' && github.repository == 'ranikun-labs/finance-harness-be' && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: dev-finance-auto-release
+    permissions: {}
+    steps:
+      - name: Require explicit DEV activation and readiness
+        env:
+          AUTO_RELEASE_ENABLED: ${{ vars.FINANCE_DEV_AUTO_RELEASE_ENABLED }}
+          OIDC_READY: ${{ vars.FINANCE_DEV_OIDC_READY }}
+          MIGRATION_CONTRACT_READY: ${{ vars.FINANCE_DEV_MIGRATION_CONTRACT_READY }}
+        run: |
+          set -euo pipefail
+          [[ "$AUTO_RELEASE_ENABLED" == 'true' && "$OIDC_READY" == 'true' && "$MIGRATION_CONTRACT_READY" == 'true' ]] || {
+            echo 'DEV automatic release is disabled or readiness has not been confirmed.' >&2
+            exit 1
+          }
+
   test:
-    if: github.repository == 'ranikun-labs/finance-harness-be' && github.ref == 'refs/heads/main'
+    needs: auto-release-gate
+    if: >-
+      always() && github.repository == 'ranikun-labs/finance-harness-be' &&
+      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+       (github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs.auto-release-gate.result == 'success'))
     runs-on: ubuntu-latest
     timeout-minutes: 35
     permissions:
@@ -39,10 +64,11 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ranikun-labs/platform-infra/.github/workflows/dev-ecs-release.yml@fdeb22805d9f26779073dc68c6f0a9a166ccb884
+    uses: ranikun-labs/platform-infra/.github/workflows/dev-ecs-release.yml@256163926b5fcbf188c48fbcac98417196033061
     with:
       service: finance
       dockerfile: Dockerfile
       context: .
-      deploy_enabled: ${{ inputs.deploy_enabled }}
+      deploy_enabled: ${{ github.event_name == 'push' || inputs.deploy_enabled }}
       test_sha: ${{ github.sha }}
+      require_current_dev_tip: ${{ github.event_name == 'push' }}

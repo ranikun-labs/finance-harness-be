@@ -52,6 +52,11 @@ FROM eclipse-temurin:21-jre-alpine AS runtime
 RUN addgroup -S app \
     && adduser -S -G app app
 
+# AWS RDS ap-northeast-2 trust bundle, pinned from the official regional trust store.
+COPY docker/rds-ap-northeast-2-bundle.pem /etc/finance/rds-ca-bundle.pem
+RUN echo "913fb5b814f17af79d4c1622584a8d0ceddf5b0d76fe353d0c7d1186cdd6b229  /etc/finance/rds-ca-bundle.pem" | sha256sum -c - \
+    && chmod 0444 /etc/finance/rds-ca-bundle.pem
+
 WORKDIR /app
 COPY --from=build /workspace/build/libs/*.jar /app/app.jar
 
